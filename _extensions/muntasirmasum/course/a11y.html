@@ -1,0 +1,74 @@
+<script>
+/* Accessibility fixes shared by all course sites.
+   1. Collapsible callout headers become keyboard-operable buttons.
+   2. Markdown tables get a horizontal scroll wrapper on narrow screens.
+   3. Any output that scrolls horizontally becomes reachable by keyboard. */
+(function () {
+  function fixCalloutHeaders() {
+    document.querySelectorAll('.callout-header[data-bs-toggle="collapse"]').forEach(function (h) {
+      h.setAttribute("role", "button");
+      h.setAttribute("tabindex", "0");
+      // Let the visible title name the button instead of "Toggle callout".
+      h.removeAttribute("aria-label");
+      h.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          h.click();
+        }
+      });
+    });
+  }
+
+  function wrapTables() {
+    document.querySelectorAll("main table").forEach(function (t) {
+      var p = t.parentElement;
+      if (p.classList.contains("mm-table-scroll") || p.closest(".cell-output-display")) return;
+      var w = document.createElement("div");
+      w.className = "mm-table-scroll";
+      p.insertBefore(w, t);
+      w.appendChild(t);
+    });
+  }
+
+  var SCROLLERS = ".cell-output-display, .cell-output pre, div.sourceCode, .mm-table-scroll, mjx-container[display='true']";
+
+  function markScrollable() {
+    document.querySelectorAll(SCROLLERS).forEach(function (el) {
+      var scrolls = el.scrollWidth > el.clientWidth + 1;
+      if (scrolls && !el.hasAttribute("tabindex")) {
+        el.setAttribute("tabindex", "0");
+        el.setAttribute("data-mm-scroll", "");
+      } else if (!scrolls && el.hasAttribute("data-mm-scroll")) {
+        el.removeAttribute("tabindex");
+        el.removeAttribute("data-mm-scroll");
+      }
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    fixCalloutHeaders();
+    wrapTables();
+  });
+
+  var timer;
+  function scheduleMark() {
+    clearTimeout(timer);
+    timer = setTimeout(markScrollable, 150);
+  }
+
+  window.addEventListener("load", function () {
+    markScrollable();
+    // Re-check once MathJax has typeset the equations.
+    if (window.MathJax && MathJax.startup && MathJax.startup.promise) {
+      MathJax.startup.promise.then(markScrollable);
+    } else {
+      setTimeout(markScrollable, 1500);
+    }
+  });
+  window.addEventListener("resize", scheduleMark);
+  // Content revealed later: collapsed callouts, tabsets, folded code.
+  document.addEventListener("shown.bs.collapse", scheduleMark);
+  document.addEventListener("shown.bs.tab", scheduleMark);
+  document.addEventListener("toggle", scheduleMark, true);
+})();
+</script>

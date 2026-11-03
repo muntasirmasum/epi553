@@ -1,0 +1,6 @@
+# Values that change each semester. Use in pages as {{< var semester >}}.
+semester: "Spring 2027"
+course-code: "EPI 553"
+course-title: "Principles of Statistical Inference II"
+instructor: "Muntasir Masum, PhD"
+lms: "Brightspace"

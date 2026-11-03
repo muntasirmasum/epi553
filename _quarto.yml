@@ -1,0 +1,80 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - "*.qmd"
+    - "!data-raw/"
+
+execute:
+  freeze: auto
+
+lang: en
+license: "CC BY-NC"
+
+website:
+  title: "EPI 553"
+  description: "Lecture notes and R labs for EPI 553, Principles of Statistical Inference II, University at Albany."
+  site-url: "https://epi553.muntasirmasum.com"
+  repo-url: "https://github.com/muntasirmasum/epi553"
+  repo-actions: [edit, issue]
+  page-navigation: true
+  back-to-top-navigation: true
+  bread-crumbs: true
+  search:
+    location: navbar
+    type: overlay
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: lectures/index.qmd
+        text: Lectures
+    right:
+      - text: "muntasirmasum.com"
+        href: "https://muntasirmasum.com/teaching.html"
+      - icon: github
+        href: "https://github.com/muntasirmasum/epi553"
+        aria-label: "Source on GitHub"
+  sidebar:
+    style: docked
+    collapse-level: 2
+    contents:
+      - section: "Getting started"
+        contents:
+          - href: index.qmd
+            text: "About the notes"
+      - section: "Lectures"
+        contents:
+          - href: lectures/index.qmd
+            text: "All lectures"
+          - lectures/simple-linear-regression.qmd
+  page-footer:
+    left: |
+      © 2026 [Muntasir Masum](https://muntasirmasum.com), University at Albany.
+      Content licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+    right: "Built with [Quarto](https://quarto.org/)."
+
+format:
+  html:
+    theme:
+      light: [brand, _extensions/muntasirmasum/course/course.scss, _extensions/muntasirmasum/course/course-light.scss]
+      dark: [brand, _extensions/muntasirmasum/course/course.scss, _extensions/muntasirmasum/course/course-dark.scss]
+    respect-user-color-scheme: true
+    include-after-body: _extensions/muntasirmasum/course/a11y.html
+    toc: true
+    toc-depth: 3
+    toc-title: "On this page"
+    number-sections: false
+    code-copy: true
+    code-fold: show
+    code-summary: "Show the code"
+    code-link: true
+    code-overflow: wrap
+    highlight-style: a11y
+    lightbox: true
+    fig-responsive: true
+    reference-location: margin
+    anchor-sections: true
+    smooth-scroll: true
+    html-math-method: mathjax
+    date-format: long

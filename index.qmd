@@ -1,0 +1,24 @@
+---
+title: "EPI 553: Principles of Statistical Inference II"
+subtitle: "Lecture notes and R labs by Muntasir Masum, University at Albany"
+toc: false
+page-navigation: false
+---
+
+::: {.hero-lead}
+These notes cover the regression toolkit that epidemiologists use every day: analysis of variance, linear regression and its diagnostics, logistic regression for binary and multi-category outcomes, Poisson regression for counts, and survival analysis for time-to-event data. Every lecture works through real survey data in R, so you can run each step yourself.
+:::
+
+## How to use the notes
+
+Each lecture lives on its own page and keeps the same address from one semester to the next, so a link you save today will still work later. Start from the [list of lectures](lectures/index.qmd), or use the search box at the top of any page.
+
+On every lecture page you will find learning objectives, the code that loads that lecture's data, and all the R code for the analysis. Lectures that use the Behavioral Risk Factor Surveillance System load it with the [brfssdata](https://muntasirmasum.github.io/brfssdata/) R package, so there are no data files to download: run the code and you get the same sample used in class. Code blocks have a copy button in the top right corner. Equations, tables, and figures appear where the lecture discusses them, and figures enlarge when you click them. The toggle switch at the top of the page changes between light and dark reading modes.
+
+## Course logistics
+
+Deadlines, announcements, assignment submission, and grades are on {{< var lms >}}. This site holds the teaching materials only.
+
+## Spotted a mistake?
+
+Use the **Report an issue** link on any lecture page (beside the list of sections, or at the bottom on small screens), or email the instructor. Corrections are fixed on the page directly, so everyone sees the updated version.

@@ -1,0 +1,70 @@
+# Shared brand for Muntasir Masum's course sites.
+# Colors and fonts mirror muntasirmasum.com (site.css tokens).
+
+meta:
+  name: Muntasir Masum
+  link: https://muntasirmasum.com
+
+color:
+  palette:
+    purple: "#46166b"
+    purple-deep: "#341050"
+    purple-tint: "#f1ecf7"
+    lavender: "#cbb1e8"
+    gold: "#c2a23a"
+    ink: "#1f2d3a"
+    slate: "#3b4651"
+    night: "#141118"
+    night-surface: "#1f1b27"
+    mist: "#cdc9d6"
+  background:
+    light: "#ffffff"
+    dark: night
+  foreground:
+    light: slate
+    dark: mist
+  primary:
+    light: purple
+    dark: lavender
+  secondary:
+    light: "#5a6571"
+    dark: "#aaa6b5"
+  tertiary:
+    light: purple-tint
+    dark: "#2a2138"
+  light: "#f5f6f8"
+  dark: ink
+
+typography:
+  fonts:
+    - family: IBM Plex Sans
+      source: google
+      weight: [400, 500, 600, 700]
+      style: [normal, italic]
+    - family: Newsreader
+      source: google
+      weight: [500, 600, 700]
+      style: [normal, italic]
+    - family: IBM Plex Mono
+      source: google
+      weight: [400, 500]
+  base:
+    family: IBM Plex Sans
+    line-height: 1.7
+  headings:
+    family: Newsreader
+    weight: 600
+    color:
+      light: ink
+      dark: "#f4f2f8"
+  monospace:
+    family: IBM Plex Mono
+  monospace-inline:
+    color:
+      light: purple-deep
+      dark: lavender
+  link:
+    color:
+      light: purple
+      dark: lavender
+    decoration: underline

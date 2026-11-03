@@ -1,0 +1,30 @@
+# uvr project library (rebuilt from uvr.lock with `uvr sync`)
+/.uvr/library/
+
+# Quarto build output and machine-specific settings
+/_site/
+/.quarto/
+_environment.local
+**/*.quarto_ipynb
+
+# Editor settings that carry local paths (uvr regenerates them)
+/.vscode/
+
+# Raw survey files and render byproducts
+data-raw/raw/
+*.XPT
+*.xpt
+*_cache/
+*_files/
+rsconnect/
+.Rhistory
+.RData
+.DS_Store
+
+# Execution ledger and logs
+/.superpowers/
+
+/_*.local
+
+# Local R environment variables (e.g. BRFSS_RAW_DIR)
+.Renviron
