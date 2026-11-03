@@ -4,6 +4,8 @@ project:
   render:
     - "*.qmd"
     - "!data-raw/"
+  resources:
+    - CNAME
 
 execute:
   freeze: auto
