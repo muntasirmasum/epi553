@@ -1,0 +1,105 @@
+---
+title: "Week 1 Setup and Workflow Checklist"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+Replace each `[ ]` with `[x]` when the item is done, and answer each reflection question in the space below it.
+
+## Section 1: R and your IDE
+
+- [ ] R 4.4 or later is installed
+- [ ] Positron or RStudio is installed and opens without errors
+- [ ] I can open this file in my IDE
+
+```{r}
+#| label: versions
+R.version.string
+```
+
+**Reflection question 1:** Which IDE and which version of R are you using?
+
+*Your answer:*
+
+## Section 2: Required packages
+
+```{r}
+#| label: packages
+#| message: false
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(car)
+library(NHANES)
+library(brfssdata)
+library(corrplot)
+```
+
+- [ ] All packages loaded without errors
+- [ ] If any failed, I restarted R and tried again
+
+**Reflection question 2:** Did any packages fail to install or load? If so, which ones, and how did you fix it?
+
+*Your answer:*
+
+## Section 3: Project folder
+
+```{r}
+#| label: folders
+getwd()
+dir.exists(c("data", "scripts", "outputs", "figures"))
+```
+
+- [ ] My course folder has `data/`, `scripts/`, `outputs/`, and `figures/`
+- [ ] I open the folder each time I work on the course
+
+**Reflection question 3:** Describe your folder structure. What does `getwd()` print?
+
+*Your answer:*
+
+## Section 4: Rendering
+
+- [ ] I rendered this file to HTML
+- [ ] The HTML opened in the Viewer or my browser
+
+**Reflection question 4:** Describe what you clicked to render this checklist and what happened.
+
+*Your answer:*
+
+## Section 5: Files and uploads
+
+- [ ] I can find the rendered HTML file on my computer
+- [ ] My files are named `LastName_FirstName_Setup_Checklist.qmd` and `.html`
+- [ ] I found the assignment in Brightspace
+
+**Reflection question 5:** What is the exact filename of your rendered HTML file?
+
+*Your answer:*
+
+## Section 6: A first analysis
+
+```{r}
+#| label: analysis
+data(mtcars)
+summary(mtcars[, c("mpg", "wt")])
+
+ggplot(mtcars, aes(x = wt, y = mpg)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(x = "Weight (1000 lbs)", y = "Miles per gallon")
+
+tidy(lm(mpg ~ wt, data = mtcars))
+```
+
+- [ ] The data loaded and the summary printed
+- [ ] The plot rendered
+- [ ] The model ran and printed its results
+
+**Reflection question 6:** Describe the relationship between vehicle weight and fuel efficiency in the plot. What does the model suggest?
+
+*Your answer:*

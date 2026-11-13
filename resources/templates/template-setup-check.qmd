@@ -1,0 +1,74 @@
+---
+title: "EPI 553 Setup Check"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+---
+
+Render this file from your `EPI553` project folder. Each section reports what it found.
+
+## R version
+
+```{r}
+#| label: r-version
+cat("R version:", as.character(getRversion()), "\n")
+if (getRversion() >= "4.4.0") {
+  cat("OK: R is 4.4 or later.\n")
+} else {
+  cat("UPDATE NEEDED: install R 4.4 or later from https://cloud.r-project.org/\n")
+}
+```
+
+## Course packages
+
+```{r}
+#| label: packages
+pkgs <- c("tidyverse", "rmarkdown", "knitr", "kableExtra", "broom",
+          "gtsummary", "car", "ggeffects", "janitor", "plotly",
+          "NHANES", "brfssdata", "corrplot")
+installed <- pkgs %in% rownames(installed.packages())
+data.frame(package = pkgs, installed = ifelse(installed, "yes", "MISSING"))
+if (all(installed)) {
+  cat("OK: all course packages are installed.\n")
+} else {
+  cat("Install the missing ones with install.packages(c(",
+      paste0('"', pkgs[!installed], '"', collapse = ", "), "))\n")
+}
+```
+
+## Project folder
+
+```{r}
+#| label: folders
+cat("This file is in:", basename(getwd()), "\n")
+folders <- c("data", "scripts", "outputs", "figures")
+data.frame(folder = folders, exists = ifelse(dir.exists(folders), "yes", "MISSING"))
+```
+
+If a folder is missing, create it in your file manager or with `dir.create("data")`.
+
+## Test plot and model
+
+```{r}
+#| label: test-plot
+#| fig-alt: "Scatter plot of miles per gallon against car weight for 32 cars in the mtcars data, with a fitted line sloping downward."
+library(ggplot2)
+ggplot(mtcars, aes(x = wt, y = mpg)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(x = "Weight (1000 lbs)", y = "Miles per gallon",
+       title = "If you can see this plot, ggplot2 works")
+```
+
+```{r}
+#| label: test-model
+summary(lm(mpg ~ wt, data = mtcars))$coefficients
+```
+
+## Session info
+
+```{r}
+#| label: session-info
+sessionInfo()
+```

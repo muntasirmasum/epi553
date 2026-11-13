@@ -1,0 +1,1414 @@
+---
+title: "Review of EPI 552"
+subtitle: "The variable types, summaries, distributions, and inference tools that EPI 553 builds on."
+description: "Variable types, center and spread, the normal, binomial, and Poisson distributions, standard errors, confidence intervals, hypothesis tests, and t-tests."
+order: 1
+unit: "Foundations"
+categories: [Foundations]
+fig-width: 7
+fig-height: 4.5
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- classify a variable as nominal, ordinal, discrete, or continuous, and explain why the type decides the method;
+- choose and compute measures of center and spread for symmetric and skewed data;
+- compute probabilities from the normal, binomial, and Poisson distributions in R;
+- explain the difference between a standard deviation and a standard error;
+- interpret a 95% confidence interval and the result of a hypothesis test correctly;
+- run and read one-sample, two-sample, and paired t-tests.
+:::
+
+## Welcome to EPI 553!
+
+This course builds directly on EPI 552, extending your statistical toolkit to include:
+
+- **ANOVA** (Analysis of Variance)
+- **Correlation** analysis
+- **Simple and Multiple Linear Regression**
+- **Logistic Regression**
+- Model diagnostics and selection
+
+**Key Philosophy**: We learn to code first, then use AI as a tool when needed, not as a replacement for understanding.
+
+## Review: Essential Concepts from EPI 552
+
+### 1. Types of Variables
+
+#### Why This Matters
+Choosing the correct statistical method depends entirely on identifying variable types correctly. Using the wrong test (e.g., treating ordinal data as continuous) can lead to invalid conclusions.
+
+#### Types of Variables
+
+**Categorical Variables** (Qualitative):
+
+- **Nominal**: No inherent order (e.g., race/ethnicity, marital status, blood type)
+- **Ordinal**: Natural ordering (e.g., education level, disease severity, Likert scales)
+
+**Numerical Variables** (Quantitative):
+
+- **Discrete**: Countable values (e.g., number of hospitalizations, parity)
+- **Continuous**: Measurable on a continuum (e.g., blood pressure, age, BMI)
+
+#### Watch Out!
+
+- Age can be **continuous** (38.5 years) or **categorical** (age groups: 18-29, 30-44, etc.)
+- Don't assume all numbers are continuous: patient ID numbers are nominal!
+- Collapsing continuous variables into categories loses information and statistical power
+
+```{r}
+#| label: variable-types-example
+#| message: false
+library(tidyverse)
+library(kableExtra)
+
+# Creating example data (seeded so the table is the same every time)
+set.seed(553)
+example_data <- tibble(
+  patient_id = 1:100,  # Nominal (despite being numeric!)
+  age_continuous = rnorm(100, mean = 45, sd = 15),  # Continuous
+  education = sample(c("High School", "Bachelor's", "Graduate"), 
+                    100, replace = TRUE),  # Ordinal
+  blood_type = sample(c("A", "B", "AB", "O"), 
+                     100, replace = TRUE),  # Nominal
+  num_visits = rpois(100, lambda = 3)  # Discrete
+)
+
+# View structure
+glimpse(example_data)
+
+# Display first 10 rows in a nice table
+example_data |>
+  head(10) |>
+  kbl(caption = "Example Data: Variable Types (First 10 Patients)",
+      col.names = c("Patient ID", "Age (years)", "Education Level", 
+                    "Blood Type", "Number of Visits"),
+      digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                position = "left") |>
+  add_header_above(c("Nominal" = 1, "Continuous" = 1, "Ordinal" = 1, 
+                     "Nominal" = 1, "Discrete" = 1))
+```
+
+### 2. Measures of Central Tendency
+
+#### Why/When/Watch-out
+
+**Why**: Central tendency summarizes "typical" values in your data, essential for describing populations and detecting outliers.
+
+**When to Use Each**:
+
+- **Mean**: Symmetric distributions, no extreme outliers (e.g., height, blood pressure in healthy populations)
+- **Median**: Skewed distributions, outliers present (e.g., income, length of hospital stay)
+- **Mode**: Categorical data or identifying most common values (e.g., most common diagnosis)
+
+**Watch Out**:
+
+- Mean is sensitive to outliers: one extreme value can distort it
+- Median is robust but doesn't use all information
+- Mode can have multiple values (bimodal/multimodal distributions)
+
+#### Formulas
+
+**Mean (Arithmetic Average)**:
+$$\bar{x} = \frac{\sum_{i=1}^{n} x_i}{n}$$
+
+**Median**: Middle value when data are ordered
+
+- If $n$ is odd: middle value
+- If $n$ is even: average of two middle values
+
+**Mode**: Most frequently occurring value
+
+```{r}
+#| label: fig-los
+#| fig-cap: "Right-skewed length of stay: the mean sits to the right of the median"
+#| fig-alt: "Histogram of simulated hospital length of stay for 100 patients, from 0 to about 18 days. Most stays are under 5 days and a long tail stretches to the right. A dashed blue line marks the median near 3.3 days and a dashed red line marks the mean near 4.8 days, to the right of the median."
+# Simulating skewed data (e.g., hospital length of stay)
+set.seed(553)
+los_data <- rexp(100, rate = 0.2)  # Exponential distribution (right-skewed)
+
+# Calculate measures
+mean_los <- mean(los_data)
+median_los <- median(los_data)
+
+# Visualize
+tibble(length_of_stay = los_data) |>
+  ggplot(aes(x = length_of_stay)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  geom_vline(aes(xintercept = mean_los, color = "Mean"), 
+             linewidth = 1.2, linetype = "dashed") +
+  geom_vline(aes(xintercept = median_los, color = "Median"), 
+             linewidth = 1.2, linetype = "dashed") +
+  scale_color_manual(values = c("Mean" = "red", "Median" = "blue")) +
+  labs(
+    title = "Length of Stay Distribution (Right-Skewed)",
+    subtitle = "Mean is pulled toward the tail; Median is more representative",
+    x = "Days", y = "Frequency",
+    color = "Measure"
+  ) +
+  theme_minimal()
+
+# Print values
+cat("Mean:", round(mean_los, 2), "days\n")
+cat("Median:", round(median_los, 2), "days\n")
+```
+
+### 3. Measures of Variability
+
+#### Why/When/Watch-out
+
+**Why**: Variability tells us about data spread, critical for understanding population heterogeneity and precision of estimates.
+
+**When**:
+
+- **Range**: Quick, rough sense of spread (affected by outliers)
+- **IQR**: Robust measure for skewed data
+- **Variance**: Foundation for many statistical tests
+- **Standard Deviation**: Most interpretable (same units as data)
+
+**Watch Out**:
+
+- Standard deviation assumes roughly normal distribution
+- Coefficient of variation allows comparison across different scales
+- Always report variability alongside central tendency
+
+#### Formulas
+
+**Variance** (Population):
+$$\sigma^2 = \frac{\sum_{i=1}^{N} (x_i - \mu)^2}{N}$$
+
+**Variance** (Sample):
+$$s^2 = \frac{\sum_{i=1}^{n} (x_i - \bar{x})^2}{n-1}$$
+
+**Standard Deviation**:
+$$s = \sqrt{s^2}$$
+
+**Coefficient of Variation**:
+$$CV = \frac{s}{\bar{x}} \times 100\%$$
+
+```{r}
+#| label: fig-variability
+#| fig-cap: "Same mean, different spread"
+#| fig-alt: "Two overlapping density curves of systolic blood pressure, both centered near 120 mmHg. The low-variability group is a tall, narrow peak between about 105 and 135 mmHg; the high-variability group is a low, wide curve spreading from about 70 to 170 mmHg."
+# Two groups with same mean, different variability
+set.seed(553)
+group_low_var <- rnorm(100, mean = 120, sd = 5)   # Tight control
+group_high_var <- rnorm(100, mean = 120, sd = 20)  # High variability
+
+# Calculate measures
+var_comparison <- tibble(
+  Group = c("Low Variability", "High Variability"),
+  Mean = c(mean(group_low_var), mean(group_high_var)),
+  SD = c(sd(group_low_var), sd(group_high_var)),
+  CV = c(sd(group_low_var)/mean(group_low_var) * 100,
+         sd(group_high_var)/mean(group_high_var) * 100)
+)
+
+print(var_comparison)
+
+# Visualize
+tibble(
+  BP = c(group_low_var, group_high_var),
+  Group = rep(c("Low Variability", "High Variability"), each = 100)
+) |>
+  ggplot(aes(x = BP, fill = Group)) +
+  geom_density(alpha = 0.6) +
+  labs(
+    title = "Same Mean, Different Variability",
+    subtitle = "Systolic Blood Pressure in Two Populations",
+    x = "Systolic BP (mmHg)", y = "Density"
+  ) +
+  theme_minimal()
+```
+
+### 4. The Normal Distribution
+
+#### Why/When/Watch-out
+
+**Why**: Many statistical tests assume normality, and many biological variables follow approximately normal distributions.
+
+**When**:
+
+- Use for parametric tests (t-tests, ANOVA, linear regression)
+- Large samples (n > 30) often approach normality due to Central Limit Theorem
+- Check normality before applying parametric methods
+
+**Watch Out**:
+
+- Real data are never perfectly normal
+- Skewed data may need transformation (log, square root)
+- Outliers violate normality assumption
+- Small samples: normality harder to assess and more important
+
+#### Properties
+
+- **Symmetric** bell-shaped curve
+- Mean = Median = Mode
+- **68-95-99.7 Rule**:
+  - 68% within 1 SD of mean
+  - 95% within 2 SD of mean
+  - 99.7% within 3 SD of mean
+
+#### Probability Density Function
+
+$$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\right)^2}$$
+
+```{r}
+#| label: fig-normal
+#| fig-cap: "The standard normal curve and the 68-95-99.7 rule"
+#| fig-alt: "Bell-shaped standard normal density curve from z = -4 to 4, peaking at 0.4 at z = 0. Nested shaded bands mark the regions within 1, 2, and 3 standard deviations of the mean, labeled 68%, 95%, and 99.7%."
+# Standard Normal Distribution
+x <- seq(-4, 4, length.out = 1000)
+y <- dnorm(x, mean = 0, sd = 1)
+
+tibble(x = x, y = y) |>
+  ggplot(aes(x = x, y = y)) +
+  geom_line(linewidth = 1.2, color = "steelblue") +
+  geom_area(data = \(d) filter(d, x >= -1 & x <= 1), 
+            fill = "steelblue", alpha = 0.3) +
+  geom_area(data = \(d) filter(d, x >= -2 & x <= 2), 
+            fill = "steelblue", alpha = 0.2) +
+  geom_area(data = \(d) filter(d, x >= -3 & x <= 3), 
+            fill = "steelblue", alpha = 0.1) +
+  annotate("text", x = 0, y = 0.2, label = "68%", size = 5) +
+  annotate("text", x = 0, y = 0.1, label = "95%", size = 5) +
+  annotate("text", x = 0, y = 0.05, label = "99.7%", size = 5) +
+  labs(
+    title = "Standard Normal Distribution",
+    subtitle = "68-95-99.7 Rule",
+    x = "Standard Deviations from Mean (z-scores)", y = "Density"
+  ) +
+  theme_minimal()
+```
+
+#### Understanding This Plot
+
+This visualization shows the **68-95-99.7 Rule** (Empirical Rule) for the standard normal distribution:
+
+- **68%** of observations fall within **±1 SD** of the mean
+- **95%** of observations fall within **±2 SD** of the mean
+- **99.7%** of observations fall within **±3 SD** of the mean
+
+**Why This Matters:**
+
+- **Identifying outliers**: Values beyond ±3 SD are extremely rare (0.3%) and warrant investigation
+- **Clinical reference ranges**: Lab "normal" ranges are typically mean ±2 SD (capturing 95% of healthy individuals)
+- **Confidence intervals**: The 95% range directly connects to 95% CIs (using critical value ≈1.96)
+- **z-scores**: The x-axis represents z-scores: a value at +2 SD is in about the top 2.3% of the distribution (close to the 2.5% implied by "95% within 2 SD")
+
+**Example**: If systolic BP has mean = 120 mmHg and SD = 15:
+
+- 68% of people: 105-135 mmHg
+- 95% of people: 90-150 mmHg
+- 99.7% of people: 75-165 mmHg
+- Someone with BP = 155 mmHg is more than 2 SD above average (roughly the top 2%)
+
+#### Checking Normality in R
+
+```{r}
+#| label: fig-normality
+#| fig-cap: "Histograms and Q-Q plots for normal and skewed data"
+#| fig-height: 7
+#| fig-alt: "Four panels. Top row, normal data: a roughly symmetric histogram centered near 100, and a Q-Q plot whose points follow the red reference line. Bottom row, skewed data: a histogram with most values below 20 and a long right tail to 100, and a Q-Q plot whose points bend sharply above the line in the upper tail."
+# Generate example data
+set.seed(553)
+normal_data <- rnorm(100, mean = 100, sd = 15)
+skewed_data <- rexp(100, rate = 0.05)
+
+# Visual checks
+par(mfrow = c(2, 2))
+
+# Normal data
+hist(normal_data, main = "Histogram: Normal Data", 
+     xlab = "Value", col = "lightblue")
+qqnorm(normal_data, main = "Q-Q Plot: Normal Data")
+qqline(normal_data, col = "red", lwd = 2)
+
+# Skewed data
+hist(skewed_data, main = "Histogram: Skewed Data", 
+     xlab = "Value", col = "salmon")
+qqnorm(skewed_data, main = "Q-Q Plot: Skewed Data")
+qqline(skewed_data, col = "red", lwd = 2)
+
+par(mfrow = c(1, 1))
+
+# Statistical test
+shapiro.test(normal_data)  # p > 0.05 suggests normality
+shapiro.test(skewed_data)  # p < 0.05 suggests non-normality
+```
+
+#### Understanding Normality Checks
+
+These plots demonstrate **two methods** for checking whether data follow a normal distribution, a critical assumption for parametric tests.
+
+**Top Row (Normal Data):**
+
+- **Histogram**: Symmetric, bell-shaped distribution
+- **Q-Q Plot**: Points fall closely along the red reference line
+- **Shapiro-Wilk test**: p > 0.05 → **consistent with normality**
+
+**Bottom Row (Skewed Data):**
+
+- **Histogram**: Right-skewed with long tail (typical of income, hospital stay data)
+- **Q-Q Plot**: Points deviate from the line, especially in the upper tail
+- **Shapiro-Wilk test**: p < 0.05 → **significantly non-normal**
+
+**How to Read Q-Q Plots:**
+
+- **Points on the line** = data match normal distribution
+- **Points curve above the line** (upper right) = right-skewed, heavy upper tail
+- **Points curve below the line** (lower left) = left-skewed or light lower tail
+- **S-shaped pattern** = heavy tails on both ends
+
+**Decision Rules:**
+
+1. **Visual inspection**: Histogram should be roughly bell-shaped; Q-Q plot points should follow the line
+2. **Shapiro-Wilk test**: 
+   - p > 0.05: No evidence against normality (safe to use parametric tests)
+   - p < 0.05: Data are significantly non-normal (consider transformation or non-parametric tests)
+
+**What to Do with Non-Normal Data:**
+
+- **Transform**: Log, square root, or Box-Cox transformation
+- **Use non-parametric tests**: Wilcoxon, Kruskal-Wallis instead of t-test/ANOVA
+- **Large samples**: Parametric tests are robust to moderate non-normality when n > 30 (Central Limit Theorem)
+
+### 5. Binomial Distribution
+
+#### Why/When/Watch-out
+
+**Why**: The binomial distribution models the number of "successes" in a fixed number of independent trials, fundamental for epidemiologic studies with binary outcomes.
+
+**When**:
+
+- **Fixed number of trials** (n): e.g., 100 patients screened
+- **Two possible outcomes**: Success/failure, disease/no disease, positive/negative test
+- **Independent trials**: One patient's outcome doesn't affect another's
+- **Constant probability**: Same probability (p) for each trial
+
+**Watch Out**:
+
+- **Not** for continuous outcomes
+- Assumes independence (violated in clustered data, family studies)
+- Large n and moderate p → approximates normal distribution
+- Small p and large n → consider Poisson distribution instead
+
+#### Real-World Applications
+
+- Number of positive COVID tests out of 50 tests administered
+- Number of patients who experience side effects out of 200 treated
+- Number of smokers who develop lung cancer out of 1000 followed
+- Prevalence studies: number diseased out of n sampled
+
+#### Probability Mass Function
+
+$$P(X = k) = \binom{n}{k} p^k (1-p)^{n-k}$$
+
+where:
+
+- $n$ = number of trials
+- $k$ = number of successes
+- $p$ = probability of success on each trial
+- $\binom{n}{k} = \frac{n!}{k!(n-k)!}$ = "n choose k"
+
+**Mean**: $\mu = np$  
+**Variance**: $\sigma^2 = np(1-p)$  
+**Standard Deviation**: $\sigma = \sqrt{np(1-p)}$
+
+```{r}
+#| label: fig-binomial
+#| fig-cap: "Binomial distribution of infections among 100 vaccinated people (p = 0.20)"
+#| fig-alt: "Bar chart of binomial probabilities for 0 to 40 infections. The bars form a bell shape centered on a dashed red line at the mean of 20, with the tallest bar near 0.10, and probabilities are near zero below 8 and above 33 infections."
+# Example: Vaccination effectiveness study
+# 100 vaccinated individuals exposed to disease
+# Vaccine is 80% effective (p = 0.20 probability of infection)
+n <- 100
+p <- 0.20
+
+# Calculate probabilities for different numbers of infections
+x <- 0:40
+probs <- dbinom(x, size = n, prob = p)
+
+tibble(infections = x, probability = probs) |>
+  ggplot(aes(x = infections, y = probability)) +
+  geom_col(fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = n*p, color = "red", linetype = "dashed", linewidth = 1) +
+  annotate("text", x = n*p + 5, y = max(probs) * 0.9, 
+           label = paste("Mean =", n*p), color = "red", size = 4) +
+  labs(
+    title = "Binomial Distribution: Vaccine Study",
+    subtitle = "n = 100 vaccinated individuals, p = 0.20 (infection probability)",
+    x = "Number of Infections", y = "Probability"
+  ) +
+  theme_minimal()
+
+# Calculate specific probabilities
+cat("Expected number of infections:", n*p, "\n")
+cat("SD:", sqrt(n*p*(1-p)), "\n\n")
+
+# What's the probability of exactly 15 infections?
+prob_15 <- dbinom(15, size = n, prob = p)
+cat("P(X = 15):", round(prob_15, 4), "\n")
+
+# What's the probability of 25 or more infections (worse than expected)?
+prob_25_or_more <- 1 - pbinom(24, size = n, prob = p)
+cat("P(X >= 25):", round(prob_25_or_more, 4), "\n")
+
+# What's the probability of 15 or fewer infections (better than expected)?
+prob_15_or_less <- pbinom(15, size = n, prob = p)
+cat("P(X <= 15):", round(prob_15_or_less, 4), "\n")
+```
+
+#### Calculating Binomial Probabilities
+
+**Scenario**: 100 vaccinated individuals exposed to disease, vaccine is 80% effective (so p = 0.20 probability of infection).
+
+**Five Key Calculations:**
+
+1. **Expected infections**: $\mu = np = 100 \times 0.20 = 20$ infections
+   - On average, we expect 20 breakthrough infections
+
+2. **Standard deviation**: $\sigma = \sqrt{np(1-p)} = \sqrt{100 \times 0.20 \times 0.80} = 4$ infections
+   - Typical variation is about ±4 infections from the mean
+
+3. **P(X = 15)** = 0.0481 (4.8% probability)
+   - Probability of observing exactly 15 infections
+   - Uses `dbinom(15, size = 100, prob = 0.20)`
+
+4. **P(X ≥ 25)** = 0.1314 (13.1% probability)
+   - Probability of 25 or more infections (worse than expected)
+   - Uses `1 - pbinom(24, ...)` (complement rule)
+   - Interpretation: If vaccine effectiveness dropped, we'd see elevated infection rates
+
+5. **P(X ≤ 15)** = 0.1285 (12.9% probability)
+   - Probability of 15 or fewer infections (better than expected)
+   - Uses `pbinom(15, ...)` (cumulative probability)
+   - Interpretation: Vaccine performing better than the 80% effectiveness claim
+
+**Public Health Application**: These calculations help determine if observed outcomes differ significantly from expected vaccine performance.
+
+#### Example: Sample Size Calculation
+
+```{r}
+#| label: fig-sample-size
+#| fig-cap: "Chance of finding at least one case, by sample size, when prevalence is 5%"
+#| fig-alt: "Line rising steeply from about 0.05 at a sample size of 1 and leveling off near 1 by 100. It crosses the dashed red 95% threshold line at about 59 people."
+# How many people need to be tested to be 95% confident 
+# we'll see at least 1 case if prevalence is 5%?
+
+p_disease <- 0.05 #Disease prevalence is 5%
+n_test <- 1:100 #Test sample sizes from 1 to 100
+
+# Probability of seeing at least 1 case
+prob_at_least_1 <- 1 - dbinom(0, size = n_test, prob = p_disease)
+
+# `dbinom(0, size = n, prob = 0.05)` = Probability of finding **zero cases** (missing the disease entirely)
+# `1 - dbinom(0, ...)` = **Complement rule**: Probability of finding **at least 1 case**
+# This is calculated for each sample size (n = 1, 2, 3, ..., 100)
+
+tibble(n = n_test, probability = prob_at_least_1) |>
+  ggplot(aes(x = n, y = probability)) +
+  geom_line(linewidth = 1.2, color = "steelblue") +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "red") +
+  annotate("text", x = 75, y = 0.93, 
+           label = "95% threshold", color = "red", size = 4) +
+  labs(
+    title = "Sample Size for Detecting Disease",
+    subtitle = "Probability of finding ≥1 case when prevalence = 5%",
+    x = "Sample Size (n)", y = "Probability of ≥1 Case"
+  ) +
+  theme_minimal()
+
+# Find minimum n needed
+n_needed <- min(which(prob_at_least_1 >= 0.95))
+cat("Need to test at least", n_needed, "people to be 95% confident of finding ≥1 case\n")
+```
+
+### 6. Poisson Distribution
+
+#### Why/When/Watch-out
+
+**Why**: The Poisson distribution models the number of rare events occurring in a fixed interval of time or space, essential for disease surveillance and outbreak detection.
+
+**When**:
+
+- **Rare events**: Low probability, but many opportunities
+- **Count data**: Number of events (0, 1, 2, 3, ...)
+- **Fixed interval**: Time period, geographic area, population size
+- **Independent events**: One event doesn't affect probability of another
+- **Constant rate**: Average rate (λ) stays the same
+
+**Watch Out**:
+
+- Only one parameter (λ = mean = variance)
+- If variance >> mean → overdispersion (negative binomial may be better)
+- As λ increases, distribution becomes more symmetric (normal approximation)
+- Can't use for continuous outcomes
+
+##### Why Poisson Can't Handle Continuous Outcomes
+
+**The Poisson distribution only models COUNT data** (0, 1, 2, 3, ...): whole numbers representing "how many times" an event occurred.
+
+**Examples of COUNT data (Poisson is appropriate):**
+
+- Number of TB cases: 0, 1, 2, 3, 4, ...
+- Number of hospital admissions: 0, 1, 2, 3, ...
+- Number of adverse drug reactions: 0, 1, 2, 3, ...
+
+**Examples of CONTINUOUS data (Poisson is NOT appropriate):**
+
+- Blood pressure: 120.5, 135.2, 118.7 mmHg
+- BMI: 24.3, 28.9, 31.2 kg/m²
+- Length of hospital stay: 2.5 days, 4.8 days, 7.3 days
+- Survival time: 3.2 years, 5.7 years, 8.1 years
+
+**Why the distinction matters:**
+
+1. **Poisson probability formula** $P(X = k) = \frac{\lambda^k e^{-\lambda}}{k!}$ only works for non-negative integers (k = 0, 1, 2, ...)
+
+2. **You can't calculate** $P(X = 2.5)$ using Poisson; there's no such thing as "2.5 cases" of a disease
+
+3. **For continuous outcomes, use:**
+
+   - Normal distribution (if symmetric)
+   - Log-normal distribution (if right-skewed, like survival times)
+   - Exponential distribution (for waiting times)
+   - Linear regression (for modeling relationships)
+
+**Common Mistake to Avoid:**
+
+Students sometimes confuse:
+
+  - **Wrong:** "Average length of hospital stay = 3.2 days" → This is CONTINUOUS, don't use Poisson
+  - **Right:** "Number of hospital admissions per day = 3.2" → This is the RATE (λ) for a Poisson process, which is fine
+
+**Bottom Line**: If your outcome can have decimal values, Poisson is the wrong choice. Use distributions designed for continuous data instead.
+
+#### Real-World Applications
+
+- Number of TB cases per county per year
+- Number of hospital-acquired infections per month
+- Number of 911 calls per hour
+- Number of disease clusters in a geographic region
+- Number of adverse drug reactions reported per week
+
+#### Probability Mass Function
+
+$$P(X = k) = \frac{\lambda^k e^{-\lambda}}{k!}$$
+
+where:
+
+- $\lambda$ = average rate (events per interval)
+- $k$ = number of events observed
+- $e$ ≈ 2.71828
+
+**Mean**: $\mu = \lambda$  
+**Variance**: $\sigma^2 = \lambda$  
+**Standard Deviation**: $\sigma = \sqrt{\lambda}$
+
+**Key Property**: Mean equals variance!
+
+```{r}
+#| label: fig-poisson
+#| fig-cap: "Poisson distribution of monthly hospital infections (λ = 3)"
+#| fig-alt: "Bar chart of Poisson probabilities for 0 to 12 infections with mean 3. The tallest bars, about 0.22, are at 2 and 3 infections; probabilities are about 0.05 at 0 and at 6, and near zero beyond 9. A dashed red line marks λ = 3."
+# Example: Hospital-acquired infections
+# Average rate: 3 infections per month
+lambda <- 3
+
+# Calculate probabilities
+x <- 0:12
+probs <- dpois(x, lambda = lambda)
+
+tibble(infections = x, probability = probs) |>
+  ggplot(aes(x = infections, y = probability)) +
+  geom_col(fill = "darkorange", alpha = 0.7) +
+  geom_vline(xintercept = lambda, color = "red", linetype = "dashed", linewidth = 1) +
+  annotate("text", x = lambda + 1.5, y = max(probs) * 0.9, 
+           label = paste("λ =", lambda), color = "red", size = 4) +
+  labs(
+    title = "Poisson Distribution: Hospital Infections",
+    subtitle = "Average rate: λ = 3 infections per month",
+    x = "Number of Infections", y = "Probability"
+  ) +
+  theme_minimal()
+
+# Calculate specific probabilities
+cat("Expected infections per month:", lambda, "\n")
+cat("SD:", sqrt(lambda), "\n\n")
+
+# What's the probability of exactly 5 infections?
+prob_5 <- dpois(5, lambda = lambda)
+cat("P(X = 5):", round(prob_5, 4), "\n")
+
+# What's the probability of 6 or more (concerning outbreak)?
+prob_6_or_more <- 1 - ppois(5, lambda = lambda)
+cat("P(X >= 6):", round(prob_6_or_more, 4), "\n")
+
+# What's the probability of zero infections (very good month)?
+prob_0 <- dpois(0, lambda = lambda)
+cat("P(X = 0):", round(prob_0, 4), "\n")
+```
+
+#### Comparing Different Rates
+
+```{r}
+#| label: fig-poisson-rates
+#| fig-cap: "Poisson distributions for average rates of 2, 5, and 10 cases per month"
+#| fig-alt: "Grouped bar chart of Poisson probabilities for 0 to 20 cases per month in three county types. The rural county (λ = 2) peaks at about 0.27 at 1 and 2 cases; the suburban county (λ = 5) peaks near 0.18 at 4 and 5 cases; the urban county (λ = 10) peaks near 0.13 at 9 and 10 cases and is the most spread out."
+# Compare disease incidence in three counties
+lambda1 <- 2   # Rural county
+lambda2 <- 5   # Suburban county  
+lambda3 <- 10  # Urban county
+
+x <- 0:20
+
+tibble(
+  cases = rep(x, 3),
+  probability = c(dpois(x, lambda1), dpois(x, lambda2), dpois(x, lambda3)),
+  county = rep(c("Rural (λ=2)", "Suburban (λ=5)", "Urban (λ=10)"), each = length(x))
+) |>
+  ggplot(aes(x = cases, y = probability, fill = county)) +
+  geom_col(position = "dodge", alpha = 0.7) +
+  labs(
+    title = "Poisson Distribution: Disease Incidence Across Counties",
+    subtitle = "Higher λ = higher average case count and more spread",
+    x = "Number of Cases per Month", y = "Probability",
+    fill = "County Type"
+  ) +
+  theme_minimal()
+```
+
+**Key Insight:** As λ increases:
+
+1. The distribution **shifts right** (higher average)
+2. The distribution **spreads out more** (higher variance)
+3. The distribution becomes **more symmetric** (approaches normal)
+
+**Public Health Application:**
+
+Understanding these patterns helps epidemiologists:
+
+- Set appropriate surveillance thresholds for different regions
+- Recognize that urban areas naturally have more variation in case counts
+- Distinguish between expected variation (λ=10 county seeing 15 cases) vs. true outbreak (λ=2 county seeing 15 cases)
+
+#### Application: Outbreak Detection
+
+```{r}
+#| label: fig-outbreak
+#| fig-cap: "Nine observed cases against a Poisson distribution with mean 4"
+#| fig-alt: "Bar chart of Poisson probabilities for 0 to 15 cases with mean 4, tallest at 3 and 4 cases (about 0.20), with a dashed blue line at 4. The bar for 9 cases, the observed count, is red and very short, about 0.013, far in the right tail."
+# Historical average: 4 cases per month
+# This month: 9 cases observed
+# Is this an outbreak?
+
+lambda_historical <- 4
+observed <- 9
+
+# Calculate p-value (probability of observing ≥9 cases by chance)
+p_value <- 1 - ppois(observed - 1, lambda = lambda_historical)
+
+cat("Historical average:", lambda_historical, "cases/month\n")
+cat("Observed this month:", observed, "cases\n")
+cat("P(X >= 9 | λ = 4):", round(p_value, 4), "\n\n")
+
+if (p_value < 0.05) {
+  cat("ALERT: Statistically significant increase (p < 0.05)\n")
+  cat("This constitutes evidence of a potential outbreak.\n")
+} else {
+  cat("Within expected variation (p >= 0.05)\n")
+}
+
+# Visualize
+x <- 0:15
+probs <- dpois(x, lambda = lambda_historical)
+
+tibble(cases = x, probability = probs) |>
+  ggplot(aes(x = cases, y = probability)) +
+  geom_col(fill = "steelblue", alpha = 0.7) +
+  geom_col(data = \(d) filter(d, cases == observed), 
+           fill = "red", alpha = 0.9) +
+  geom_vline(xintercept = lambda_historical, linetype = "dashed", color = "blue") +
+  annotate("text", x = observed, y = max(probs) * 0.5, 
+           label = "Observed", color = "red", size = 4, angle = 90) +
+  labs(
+    title = "Outbreak Detection Using Poisson Distribution",
+    subtitle = paste0("Observed = ", observed, " cases vs Expected λ = ", lambda_historical),
+    x = "Number of Cases", y = "Probability"
+  ) +
+  theme_minimal()
+```
+
+**Statistical Test:**
+
+- P(X ≥ 9 | λ = 4) = 0.0214 (2.14%)
+- **Decision**: p < 0.05 → Statistically significant increase
+- **Conclusion**: Evidence of a potential outbreak requiring investigation
+
+**Public Health Interpretation**: 
+
+The observed 9 cases is so far from the expected 4 cases that it's unlikely to be random chance alone. Public health officials should investigate potential sources (contaminated water, foodborne illness, imported case, etc.).
+
+### 7. Standard Error vs. Standard Deviation
+
+#### Why This Distinction Matters
+
+This is one of the most commonly confused concepts in statistics! Understanding the difference is critical for interpreting research findings correctly.
+
+**Standard Deviation (SD)**: Describes **variability in the population/sample**
+
+- "How spread out are individual observations?"
+- Remains roughly constant as sample size increases
+
+**Standard Error (SE)**: Describes **precision of the sample mean**
+
+- "How close is our sample mean to the true population mean?"
+- Decreases as sample size increases
+
+#### Watch Out!
+
+- Researchers sometimes report SE to make error bars look smaller, so always check which is reported!
+- SE is always smaller than SD (by a factor of $\sqrt{n}$)
+- Large sample size → small SE but SD stays similar
+
+#### Formulas
+
+**Standard Error of the Mean**:
+$$SE = \frac{s}{\sqrt{n}}$$
+
+where $s$ = sample standard deviation, $n$ = sample size
+
+```{r}
+#| label: fig-se-sd
+#| fig-cap: "Standard deviation and standard error as sample size grows"
+#| fig-alt: "Line chart for sample sizes of 10, 30, 50, 100, and 500. The standard deviation line settles near 20 after moving between 16 and 22 at the smallest sizes. The standard error line falls from about 5 at a sample size of 10 to under 1 at 500."
+# Demonstrate SE decreases with sample size
+set.seed(553)
+population <- rnorm(10000, mean = 120, sd = 20)  # True population
+
+sample_sizes <- c(10, 30, 50, 100, 500)
+results <- tibble(
+  n = sample_sizes,
+  SD = numeric(length(sample_sizes)),
+  SE = numeric(length(sample_sizes))
+)
+
+for (i in seq_along(sample_sizes)) {
+  sample_data <- sample(population, sample_sizes[i])
+  results$SD[i] <- sd(sample_data)
+  results$SE[i] <- sd(sample_data) / sqrt(sample_sizes[i])
+}
+
+print(results)
+
+# Visualize
+results |>
+  pivot_longer(cols = c(SD, SE), names_to = "Measure", values_to = "Value") |>
+  ggplot(aes(x = n, y = Value, color = Measure, group = Measure)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  labs(
+    title = "SD vs SE: Effect of Sample Size",
+    subtitle = "SD remains stable; SE decreases with √n",
+    x = "Sample Size (n)", y = "Value"
+  ) +
+  theme_minimal()
+```
+
+### 8. Confidence Intervals
+
+#### Why/When/Watch-out
+
+**Why**: Point estimates alone don't convey uncertainty. CIs provide a range of plausible values for the true population parameter.
+
+**When**: Report CIs for all estimates: means, proportions, regression coefficients, odds ratios, etc.
+
+**Watch Out**:
+
+- **95% CI interpretation**: "If we repeated this study many times, 95% of the CIs would contain the true parameter"
+- **NOT**: "There's a 95% probability the true value is in this interval"
+- Wider CIs = more uncertainty (smaller sample size or more variability)
+- CI excluding null value → statistically significant result
+
+#### Formula for Mean
+
+**95% Confidence Interval**:
+$$\bar{x} \pm t_{\alpha/2, n-1} \times SE$$
+
+where:
+
+- $\bar{x}$ = sample mean
+- $t_{\alpha/2, n-1}$ = critical t-value (1.96 for large samples)
+- $SE$ = standard error
+
+```{r}
+#| label: fig-ci-sims
+#| fig-cap: "95% confidence intervals from 20 simulated samples"
+#| fig-alt: "Twenty vertical confidence intervals around sample means of systolic blood pressure, each from a sample of 50 people, with a dashed red line at the true mean of 145 mmHg. In this simulation every interval crosses the red line; the sample means range from about 141 to 150 mmHg."
+# Example: Blood pressure in hypertensive patients
+set.seed(553)
+bp_sample <- rnorm(50, mean = 145, sd = 18)
+
+# Calculate 95% CI
+mean_bp <- mean(bp_sample)
+se_bp <- sd(bp_sample) / sqrt(length(bp_sample))
+t_crit <- qt(0.975, df = length(bp_sample) - 1)  # 95% CI
+
+ci_lower <- mean_bp - t_crit * se_bp
+ci_upper <- mean_bp + t_crit * se_bp
+
+cat("Mean BP:", round(mean_bp, 2), "mmHg\n")
+cat("95% CI: [", round(ci_lower, 2), ",", round(ci_upper, 2), "]\n")
+
+# Using t.test for CI
+t.test(bp_sample)$conf.int
+
+# Visualize multiple samples
+set.seed(553)
+n_samples <- 20
+sample_means <- numeric(n_samples)
+ci_lowers <- numeric(n_samples)
+ci_uppers <- numeric(n_samples)
+
+true_mean <- 145
+
+   for (i in 1:n_samples) {
+     sample_i <- rnorm(50, mean = true_mean, sd = 18)   # Draw sample
+     sample_means[i] <- mean(sample_i)                  # Calculate mean
+     ci_i <- t.test(sample_i)$conf.int                  # Calculate 95% CI
+     ci_lowers[i] <- ci_i[1]                            # Lower bound
+     ci_uppers[i] <- ci_i[2]                            # Upper bound
+   }
+
+ci_sims <- tibble(
+  sample = 1:n_samples,
+  mean = sample_means,
+  lower = ci_lowers,
+  upper = ci_uppers,
+  contains_true = (ci_lowers <= true_mean) & (ci_uppers >= true_mean)
+)
+n_covered <- sum(ci_sims$contains_true)
+
+ci_sims |>
+  ggplot(aes(x = sample, y = mean, color = contains_true)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3) +
+  geom_hline(yintercept = true_mean, linetype = "dashed", color = "red", linewidth = 1) +
+  scale_color_manual(values = c("TRUE" = "steelblue", "FALSE" = "orange"),
+                     labels = c("TRUE" = "Contains True Mean", "FALSE" = "Misses True Mean")) +
+  labs(
+    title = "20 Samples: 95% Confidence Intervals",
+    subtitle = "Red line = True population mean (145 mmHg)",
+    x = "Sample Number", y = "Systolic BP (mmHg)",
+    color = NULL
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+**What the Plot Shows:**
+
+- **Red dashed line**: True population mean (145 mmHg) - this is usually unknown in real studies
+- **Dots**: Sample mean from each study (varies due to sampling variability)
+- **Error bars**: 95% confidence interval for each study
+- **Blue color**: CI contains the true mean (SUCCESS)
+- **Orange color**: CI misses the true mean (FAILURE) - should happen ~5% of the time
+
+**The Correct Interpretation:**
+
+"If we repeated this study many times, approximately **95% of the confidence intervals would contain the true population mean**."
+
+In the long run about 19 of every 20 intervals (95%) capture the red line. In this simulation, `r n_covered` of the 20 intervals capture it and `r n_samples - n_covered` `r ifelse(n_samples - n_covered == 1, "misses", "miss")` it.
+
+**Common Misconceptions to Avoid:**
+
+- **Wrong:** "There's a 95% probability the true mean is in THIS interval"
+- **Wrong:** "95% of individual patients have BP in this range"
+- **Right:** "Our method produces intervals that capture the true mean 95% of the time"
+
+### 9. Hypothesis Testing Framework
+
+#### Why/When/Watch-out
+
+**Why**: Hypothesis testing provides a structured framework for making decisions under uncertainty, essential for evidence-based public health.
+
+**When**: Use when you want to test whether an observed effect is likely due to chance or represents a real phenomenon.
+
+**Watch Out**:
+
+- **p-value ≠ probability that null hypothesis is true**
+- **p < 0.05 doesn't mean effect is important** (statistical vs. clinical significance)
+- **Absence of evidence ≠ evidence of absence** (non-significant doesn't prove no effect)
+- Multiple testing inflates Type I error rate
+
+#### Steps in Hypothesis Testing
+
+1. **State hypotheses**:
+   - $H_0$: Null hypothesis (no effect, no difference)
+   - $H_A$: Alternative hypothesis (effect exists)
+
+2. **Choose significance level** ($\alpha$, typically 0.05)
+
+3. **Calculate test statistic** (t, F, χ², etc.)
+
+4. **Determine p-value**
+
+5. **Make decision**: 
+   - If $p < \alpha$: Reject $H_0$ (statistically significant)
+   - If $p \geq \alpha$: Fail to reject $H_0$ (not statistically significant)
+
+#### Types of Errors
+
+|                     | $H_0$ True          | $H_0$ False         |
+|---------------------|---------------------|---------------------|
+| **Reject $H_0$**    | Type I Error (α)    | Correct Decision    |
+| **Fail to reject $H_0$** | Correct Decision | Type II Error (β)  |
+
+ - **Type I Error (α):** "False alarm" - saying there's an effect when there isn't
+ - **Type II Error (β):** "Missed detection" - failing to detect a real effect
+ - **Power** = $1 - \beta$ (probability of detecting true effect)
+
+```{r}
+#| label: hypothesis-testing
+# Example: Testing if mean BP differs from 140 mmHg
+set.seed(553)
+bp_sample <- rnorm(40, mean = 145, sd = 18)
+
+# One-sample t-test
+t_test_result <- t.test(bp_sample, mu = 140)
+print(t_test_result)
+
+cat("\nInterpretation:\n")
+cat("H0: μ = 140 mmHg\n")
+cat("HA: μ ≠ 140 mmHg\n")
+cat("p-value =", round(t_test_result$p.value, 4), "\n")
+
+if (t_test_result$p.value < 0.05) {
+  cat("Decision: Reject H0 (p < 0.05)\n")
+  cat("Conclusion: Mean BP is significantly different from 140 mmHg\n")
+} else {
+  cat("Decision: Fail to reject H0 (p ≥ 0.05)\n")
+  cat("Conclusion: Insufficient evidence that mean BP differs from 140 mmHg\n")
+}
+```
+
+### 10. t-Tests Review
+
+#### Why/When/Watch-out
+
+**Why**: t-tests are the foundation for comparing means, the most common research question in public health.
+
+**When**:
+
+- **One-sample t-test**: Compare sample mean to known value
+- **Independent t-test**: Compare means between two groups
+- **Paired t-test**: Compare means for same subjects (before/after)
+
+**Watch Out**:
+
+- Assumes **normality** (especially for small samples)
+- Assumes **equal variances** for independent t-test (use Welch's correction if violated)
+- Paired t-test requires **matched pairs** (same subject, matched pair)
+- Large samples can detect tiny, clinically meaningless differences
+
+#### One-Sample t-Test
+
+**Test statistic**:
+$$t = \frac{\bar{x} - \mu_0}{SE} = \frac{\bar{x} - \mu_0}{s/\sqrt{n}}$$
+
+```{r}
+#| label: one-sample-ttest
+# Example: Is mean BMI in our sample different from population mean (26.5)?
+set.seed(553)
+bmi_sample <- rnorm(35, mean = 28, sd = 4.5)
+
+t.test(bmi_sample, mu = 26.5)
+```
+
+#### Independent Two-Sample t-Test
+
+**Test statistic**:
+$$t = \frac{\bar{x}_1 - \bar{x}_2}{SE_{diff}}$$
+
+```{r}
+#| label: fig-cholesterol
+#| fig-cap: "Cholesterol in treatment and control groups"
+#| fig-alt: "Box plots with jittered points for 40 control and 40 treatment patients. Control cholesterol has a median near 205 mg/dL and treatment a median near 183 mg/dL; both groups spread from roughly 145 to 240 mg/dL."
+# Example: Compare cholesterol levels between treatment and control
+set.seed(553)
+treatment <- rnorm(40, mean = 185, sd = 25)
+control <- rnorm(40, mean = 200, sd = 25)
+
+# Independent t-test
+t.test(treatment, control, var.equal = TRUE)
+
+# Visualize
+tibble(
+  cholesterol = c(treatment, control),
+  group = rep(c("Treatment", "Control"), each = 40)
+) |>
+  ggplot(aes(x = group, y = cholesterol, fill = group)) +
+  geom_boxplot(alpha = 0.7, width = 0.5) +
+  geom_jitter(width = 0.2, alpha = 0.3) +
+  labs(
+    title = "Cholesterol Levels: Treatment vs Control",
+    x = NULL, y = "Total Cholesterol (mg/dL)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+#### Paired t-Test
+
+**Test statistic**:
+$$t = \frac{\bar{d}}{SE_d} = \frac{\bar{d}}{s_d/\sqrt{n}}$$
+
+where $d$ = difference scores (after - before)
+
+```{r}
+#| label: fig-paired
+#| fig-cap: "Each patient's blood pressure before and after the intervention"
+#| fig-alt: "Paired dot plot of systolic blood pressure for 30 patients, before on the left and after on the right, with a gray line joining each patient's two readings. Every line slopes downward: readings run from about 120 to 168 mmHg before and from about 113 to 158 mmHg after."
+# Example: Blood pressure before and after intervention
+set.seed(553)
+n <- 30
+before <- rnorm(n, mean = 145, sd = 15)
+after <- before - rnorm(n, mean = 8, sd = 5)  # Average reduction of 8 mmHg
+
+# Paired t-test
+t.test(after, before, paired = TRUE)
+
+# Visualize
+tibble(
+  patient = rep(1:n, 2),
+  bp = c(before, after),
+  time = factor(rep(c("Before", "After"), each = n), levels = c("Before", "After"))
+) |>
+  ggplot(aes(x = time, y = bp, group = patient)) +
+  geom_line(alpha = 0.3) +
+  geom_point(aes(color = time), size = 3, alpha = 0.7) +
+  labs(
+    title = "Paired Data: Blood Pressure Before/After Intervention",
+    x = NULL, y = "Systolic BP (mmHg)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Looking Ahead: EPI 553 Topics
+
+In this course, we'll extend these foundational concepts to:
+
+1. **ANOVA** - Comparing means across 3+ groups
+2. **Correlation** - Quantifying linear relationships
+3. **Simple Linear Regression** - Predicting outcomes from one predictor
+4. **Multiple Linear Regression** - Adjusting for confounders, multivariable modeling
+5. **Logistic Regression** - Binary outcomes (disease yes/no)
+
+Each method builds on what you learned in EPI 552!
+
+## Practice Questions
+
+**Instructions**: Try these questions on your own before looking at the answer keys below. You can work through the calculations by hand or use R to check your work.
+
+### Question 1: Variable Types
+
+Classify each variable as **nominal**, **ordinal**, **discrete**, or **continuous**:
+
+a) Number of cigarettes smoked per day  
+b) Self-rated health (Excellent, Good, Fair, Poor)  
+c) Systolic blood pressure  
+d) Insurance type (Private, Medicare, Medicaid, Uninsured)
+
+::: {.callout-tip collapse="true"}
+## Show answers
+
+**Answers:**
+
+a) **Discrete** - Countable values (0, 1, 2, 3, ...). You can't smoke 2.5 cigarettes.
+
+b) **Ordinal** - Has natural ordering (Excellent > Good > Fair > Poor), but the intervals between categories aren't necessarily equal.
+
+c) **Continuous** - Can take any value within a range (e.g., 120.5 mmHg, 120.53 mmHg). Measured on a continuous scale.
+
+d) **Nominal** - Categories with no inherent order. Private insurance isn't "more" or "less" than Medicare; they're just different types.
+
+**Key Insight**: Getting the variable type right determines which statistical tests you can use. Correct classification guides your entire analysis strategy:
+
+- **(a) Cigarettes per day (Discrete)**: 
+  - As outcome → Poisson regression (count data)
+  - As predictor → Can use in linear regression, ANOVA, or logistic regression
+  
+- **(b) Self-rated health (Ordinal)**: 
+  - As outcome → Ordinal logistic regression (preserves ordering)
+  - As predictor → Can create dummy variables for regression models
+  
+- **(c) Systolic BP (Continuous)**: 
+  - As outcome → Linear regression, t-tests, ANOVA
+  - As predictor → Can use directly in any regression model
+  
+- **(d) Insurance type (Nominal)**: 
+  - As outcome → Multinomial logistic regression (no natural ordering)
+  - As predictor → Create dummy variables (reference group coding)
+
+**The wrong choice leads to invalid results**: Using linear regression for ordinal outcomes treats categories as equally spaced (Excellent→Good may not equal Good→Fair). Using ANOVA for count outcomes ignores the discrete, non-negative nature of the data.
+:::
+
+### Question 2: Measures of Central Tendency
+
+Given the following hospital length of stay data (days):  
+**2, 3, 3, 4, 5, 5, 5, 6, 7, 28**
+
+a) Calculate the mean, median, and mode  
+b) Which measure best represents the typical length of stay? Why?
+
+::: {.callout-tip collapse="true"}
+## Show answers
+
+**Answers:**
+
+a) **Calculations:**
+
+- **Mean**: $\bar{x} = \frac{2+3+3+4+5+5+5+6+7+28}{10} = \frac{68}{10} = 6.8$ days
+
+- **Median**: Order the data (already ordered). With n=10 (even), take average of 5th and 6th values:  
+  $\text{Median} = \frac{5+5}{2} = 5$ days
+
+- **Mode**: 5 days (appears 3 times, most frequent)
+
+b) **Which is best?**
+
+The **median (5 days)** best represents typical length of stay.
+
+**Reasoning:**
+
+- The mean (6.8 days) is pulled up by the outlier (28 days, possibly a complicated case)
+- Most patients (9 out of 10) stayed 7 days or less
+- The median is **robust to outliers** and gives a better sense of what a "typical" patient experiences
+- For skewed distributions like this (common in healthcare data), median is usually preferred
+
+**Public Health Implication**: If you reported the mean (6.8 days) to hospital administrators, they might overestimate typical resource needs. The median (5 days) better reflects the typical patient experience.
+
+:::
+
+### Question 3: Confidence Intervals
+
+A study reports: **"Mean systolic BP = 135 mmHg (95% CI: 130-140)"**
+
+a) Interpret this confidence interval in plain English  
+b) A previous study in a similar population reported a mean of 128 mmHg. Is your result statistically significantly different from this previous finding? Explain.
+
+::: {.callout-tip collapse="true"}
+## Show answers
+
+**Answers:**
+
+a) **Interpretation:**
+
+**Correct interpretation**: 
+
+"If we repeated this study many times with different samples from the same population, approximately 95% of the confidence intervals we calculated would contain the true population mean systolic blood pressure."
+
+**Practical interpretation**: "We are 95% confident that the true average systolic BP in the population lies between 130 and 140 mmHg."
+
+**Common WRONG interpretation** (avoid this!): "There's a 95% probability that the true mean is between 130 and 140."  
+*(The true mean is fixed: it either is or isn't in this interval. The probability statement is about the method, not this particular interval.)*
+
+b) **Statistical significance:**
+
+**Yes, this is significantly different from 128 mmHg** (at α = 0.05).
+
+**Reasoning:**
+
+- The 95% CI is (130-140)
+- The previous study's mean of 128 mmHg falls **outside** this interval
+- If we tested $H_0: \mu = 128$ vs $H_A: \mu \neq 128$, we would get p < 0.05
+- We can reject the null hypothesis that the true mean equals 128
+
+**Clinical note**: While statistically significant, a 7 mmHg difference (135 vs 128) may or may not be clinically meaningful depending on the context. Always consider both statistical and practical significance!
+
+:::
+
+### Question 4: Hypothesis Testing
+
+You conduct a t-test comparing mean BMI between smokers and non-smokers. The **p-value is 0.08**.
+
+a) What is your statistical decision (α = 0.05)?  
+b) What might this result mean for public health practice?  
+c) What additional information would help you interpret this result?
+
+::: {.callout-tip collapse="true"}
+## Show answers
+
+**Answers:**
+
+a) **Statistical decision:**
+
+**Fail to reject the null hypothesis** (p = 0.08 > α = 0.05)
+
+- $H_0$: Mean BMI is the same for smokers and non-smokers ($\mu_{\text{smokers}} = \mu_{\text{non-smokers}}$)
+- $H_A$: Mean BMI differs between smokers and non-smokers
+- Since p > 0.05, we don't have sufficient evidence to conclude that BMI differs between groups
+
+**Important**: We do NOT say "accept the null" or "prove there's no difference"; we simply lack sufficient evidence to reject it.
+
+b) **Public health implications:**
+
+**Interpretation requires caution:**
+
+1. **Not "proof of no effect"**: p = 0.08 is close to the significance threshold. There may be a real difference that we failed to detect (Type II error), especially if sample size was small.
+
+2. **Effect size matters**: Even if not statistically significant, if the mean difference is large (e.g., 3-4 BMI points), this could still be clinically/practically important.
+
+3. **Consider the mechanism**: Smoking is often associated with lower BMI due to metabolic effects and appetite suppression, but this doesn't mean smoking is "healthy"; it's associated with numerous other serious health risks.
+
+4. **Don't over-interpret**: This result alone shouldn't change public health messaging about smoking cessation.
+
+c) **Additional information needed:**
+
+1. **Sample size**: Small n → low statistical power → might miss real effects
+
+2. **Effect size**: What was the actual difference in mean BMI?  
+   - Smokers: 26.8 kg/m²
+   - Non-smokers: 28.1 kg/m²
+   - Difference: 1.3 kg/m² (might be meaningful even if not significant)
+
+3. **Confidence interval**: e.g., 95% CI for difference: (-0.2, 2.8)  
+   - Includes zero (consistent with p > 0.05)
+   - But upper bound suggests difference could be as large as 2.8 kg/m²
+
+4. **Standard deviations**: How variable is BMI in each group?
+
+5. **Confounders**: Are groups comparable in age, sex, socioeconomic status?
+
+6. **Power analysis**: Did the study have adequate power (typically 80%) to detect a meaningful difference?
+
+**Bottom line**: A p-value of 0.08 is **borderline**. Don't dismiss the finding entirely, but also don't over-interpret. Consider the broader context, clinical significance, and study limitations.
+
+:::
+
+### Question 5: Binomial vs. Poisson
+
+For each scenario, identify whether a **binomial** or **Poisson** distribution is more appropriate:
+
+a) Number of positive COVID tests out of 200 tests administered  
+b) Number of hospital admissions for heart attack per month in a county  
+c) Number of patients who develop a rash out of 50 given a new medication  
+d) Number of foodborne illness cases reported to the health department per week
+
+::: {.callout-tip collapse="true"}
+## Show answers
+
+**Answers:**
+
+a) **Binomial** 
+
+- Fixed number of trials (n = 200 tests)
+- Binary outcome (positive/negative)
+- Each test is independent
+- Constant probability of positive result
+
+b) **Poisson**
+
+- No fixed number of trials (people can have heart attacks anytime)
+- Rare event (low probability)
+- Count data over a time interval (per month)
+- Average rate is constant
+
+c) **Binomial**
+
+- Fixed number of trials (n = 50 patients)
+- Binary outcome (rash/no rash)
+- Independent patients
+- Constant probability of developing rash
+
+d) **Poisson**
+
+- No fixed denominator
+- Rare events
+- Count over time interval (per week)
+- Rate-based data
+
+**Key Distinction**:
+
+- **Binomial**: Fixed n, counting "successes" out of n trials
+- **Poisson**: Open-ended, counting events per unit time/space
+
+**Bridge**: When n is large and p is small, binomial ≈ Poisson (with λ = np)
+
+:::
+
+### Question 6: Poisson Probability
+
+A county typically reports an average of **λ = 2 cases** of meningitis per year.
+
+a) What's the probability of observing exactly 0 cases in a given year?  
+b) What's the probability of observing 5 or more cases (potential outbreak)?  
+c) If 6 cases were observed this year, would you consider this an outbreak? (Use α = 0.05)
+
+::: {.callout-tip collapse="true"}
+## Show answers
+
+**Answers:**
+
+a) **P(X = 0)**
+
+$$P(X = 0) = \frac{2^0 \cdot e^{-2}}{0!} = \frac{1 \cdot e^{-2}}{1} = e^{-2} \approx 0.135$$
+
+**Interpretation**: There's about a 13.5% chance of seeing zero cases in a given year: uncommon but not extremely rare.
+
+b) **P(X ≥ 5)**
+
+Calculate using complement: $P(X \geq 5) = 1 - P(X \leq 4)$
+
+$$P(X \leq 4) = \sum_{k=0}^{4} \frac{2^k e^{-2}}{k!}$$
+
+Using R or tables: $P(X \leq 4) \approx 0.947$
+
+Therefore: $P(X \geq 5) = 1 - 0.947 = 0.053$
+
+**Interpretation**: There's about a 5.3% chance of seeing 5+ cases by random chance alone.
+
+c) **Outbreak determination**
+
+Observed: X = 6 cases
+
+Calculate: $P(X \geq 6 | \lambda = 2)$
+
+$$P(X \geq 6) = 1 - P(X \leq 5) \approx 1 - 0.983 = 0.017$$
+
+**Decision**: p = 0.017 < 0.05
+
+**Conclusion**: **YES, this constitutes evidence of an outbreak.** 
+
+The probability of seeing 6 or more cases by chance alone is only 1.7%, which is below our significance threshold of 5%. This warrants further investigation. Possible sources could include:
+
+- Environmental contamination
+- College dormitory outbreak
+- Imported case with secondary transmission
+- Reporting artifact (delayed cases from previous year)
+
+**Public health action**: Investigate immediately, consider prophylaxis for close contacts, review vaccination coverage.
+
+**Note**: This is the same statistical framework used in the outbreak detection example earlier in this lecture (Historical average = 4, Observed = 9).
+
+:::
+
+**Next lecture:** [Analysis of Variance (ANOVA)](anova.qmd), comparing means across three or more groups.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

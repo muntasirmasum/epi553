@@ -1,0 +1,17 @@
+---
+title: "Labs"
+subtitle: "In-class R labs in course order. Each lab page has a template to download."
+toc: false
+page-navigation: false
+order: 0
+date-modified: ""
+body-classes: listing-page
+listing:
+  id: labs
+  contents:
+    - "lab-*.qmd"
+  sort: "order"
+  type: default
+  template: ../_cards.ejs
+  fields: [title, description, order, unit, kind]
+---

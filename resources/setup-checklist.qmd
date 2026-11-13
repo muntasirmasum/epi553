@@ -1,0 +1,118 @@
+---
+title: "Week 1 Setup and Workflow Checklist"
+subtitle: "An ungraded check-in that confirms your R setup and walks through the full workflow once."
+description: "Six short sections (install, packages, project folder, rendering, files and uploads, a first analysis), each with a reflection question, submitted to Brightspace."
+order: 3
+unit: "Getting started"
+categories: [Resources]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## How this works
+
+This is an **ungraded** assignment. It makes sure that by the end of week 1 you can install packages, work in a project folder, render a Quarto document, and upload the result. Each section has a short checklist and one reflection question.
+
+[Download the checklist (.qmd)](templates/template-setup-checklist.qmd){.btn .btn-sm .btn-outline-primary download="setup-checklist.qmd"}
+
+Save it in your `EPI553` folder as `LastName_FirstName_Setup_Checklist.qmd`, fill it in, render it, and upload the `.qmd` and HTML files to Brightspace.
+:::
+
+## Section 1: R and your IDE
+
+- [ ] R 4.4 or later is installed
+- [ ] Positron or RStudio is installed and opens without errors
+- [ ] You can open the checklist file in your IDE
+
+**Reflection question 1:** Which IDE and which version of R are you using? (Run `R.version.string` in the Console.)
+
+## Section 2: Required packages
+
+- [ ] You ran the `install.packages()` line from [Setting up R](r-setup.qmd)
+- [ ] All the packages load with `library()` without errors
+- [ ] If any failed, you restarted R and tried again (Positron: the restart button in the Console action bar, or Ctrl/Cmd + Shift + 0; RStudio: **Session → Restart R**)
+
+**Reflection question 2:** Did any packages fail to install or load? If so, which ones, and how did you fix it?
+
+## Section 3: Project folder
+
+- [ ] Your course folder (for example `EPI553`) has `data/`, `scripts/`, `outputs/`, and `figures/` subfolders
+- [ ] You open the folder each time you work (Positron: **File → Open Folder**; RStudio: open `EPI553.Rproj`)
+- [ ] `getwd()` in the Console shows your course folder
+
+**Reflection question 3:** Describe your folder structure. What does `getwd()` print?
+
+## Section 4: Rendering
+
+- [ ] You rendered a `.qmd` file to HTML (Positron: **Preview**; RStudio: **Render**)
+- [ ] The HTML opened in the Viewer or your browser
+- [ ] The YAML header includes `embed-resources: true`, so the HTML is a single file
+
+**Reflection question 4:** Describe what you clicked to render this checklist and what happened.
+
+## Section 5: Files and uploads
+
+- [ ] You can find the rendered `.html` file on your computer (next to the `.qmd`)
+- [ ] Your files are named `LastName_FirstName_Setup_Checklist.qmd` and `.html`
+- [ ] You found the assignment in Brightspace and know how to upload a file
+
+**Reflection question 5:** What is the exact filename of your rendered HTML file?
+
+## Section 6: A first analysis
+
+The checklist file loads the built-in `mtcars` data, prints summary statistics, plots fuel efficiency against weight, and fits a linear model.
+
+- [ ] The data loaded and the summary printed
+- [ ] The plot shows the relationship between weight and miles per gallon
+- [ ] The regression model ran and printed its results
+
+**Reflection question 6:** Describe the relationship between vehicle weight and fuel efficiency in the plot. What does the model suggest?
+
+## Final completion checklist
+
+- [ ] Completed all 6 sections above
+- [ ] Answered all 6 reflection questions
+- [ ] Rendered the checklist to HTML
+- [ ] Saved the HTML with the correct filename
+- [ ] Ready to upload to Brightspace
+
+## Submitting
+
+Upload both files (`.qmd` and `.html`) to the Brightspace assignment. See [Submitting your work](submitting-your-work.qmd) for the steps.
+
+## Troubleshooting
+
+- **"There is no package called X":** run `install.packages("X")` while connected to the internet, then load it again.
+- **"Object not found":** run the chunks in order from the top, or render the whole file; a chunk can only use objects made earlier.
+- **A plot does not show:** check that ggplot2 (in the tidyverse) loaded without errors.
+- **No Preview or Render button:** make sure the file ends in `.qmd` (not `.R`) and click inside it first.
+- **Package downloads blocked by a firewall:** connect to UAlbany WiFi or the UAlbany VPN and try again.
+
+**Still stuck?** For installation problems, contact the UAlbany ITS Help Desk (518-442-3700, helpdesk@albany.edu). For course questions, contact the instructor or TA through Brightspace or come to office hours.
+
+### Appendix A: install all course packages
+
+```{r}
+#| label: appendix-install
+#| eval: false
+course_packages <- c(
+  "tidyverse", "rmarkdown", "knitr", "kableExtra", "broom", "gtsummary",
+  "car", "ggeffects", "janitor", "plotly", "NHANES", "brfssdata", "corrplot"
+)
+missing <- course_packages[!course_packages %in% rownames(installed.packages())]
+if (length(missing) > 0) install.packages(missing)
+```
+
+Then restart R and render the checklist again.
+
+### Appendix B: create the project folders
+
+Run this in the Console with your course folder open:
+
+```{r}
+#| label: appendix-folders
+#| eval: false
+for (folder in c("data", "scripts", "outputs", "figures")) {
+  if (!dir.exists(folder)) dir.create(folder)
+}
+dir.exists(c("data", "scripts", "outputs", "figures"))
+```

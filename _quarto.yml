@@ -4,8 +4,12 @@ project:
   render:
     - "*.qmd"
     - "!data-raw/"
+    - "!labs/templates/"
+    - "!resources/templates/"
   resources:
     - CNAME
+    - "labs/templates/*.qmd"
+    - "resources/templates/*.qmd"
 
 execute:
   freeze: auto
@@ -31,6 +35,10 @@ website:
         text: Home
       - href: lectures/index.qmd
         text: Lectures
+      - href: labs/index.qmd
+        text: Labs
+      - href: resources/index.qmd
+        text: Resources
     right:
       - text: "muntasirmasum.com"
         href: "https://muntasirmasum.com/teaching.html"
@@ -46,10 +54,14 @@ website:
           - href: index.qmd
             text: "About the notes"
       - section: "Lectures"
-        contents:
-          - href: lectures/index.qmd
-            text: "All lectures"
-          - lectures/simple-linear-regression.qmd
+        href: lectures/index.qmd
+        contents: "lectures/*.qmd"
+      - section: "Labs"
+        href: labs/index.qmd
+        contents: "labs/*.qmd"
+      - section: "Resources"
+        href: resources/index.qmd
+        contents: "resources/*.qmd"
   page-footer:
     left: |
       © 2026 [Muntasir Masum](https://muntasirmasum.com), University at Albany.

@@ -1,0 +1,20 @@
+---
+title: "Resources"
+subtitle: "Getting set up in R, learning the basics, and submitting your work."
+toc: false
+page-navigation: false
+order: 0
+date-modified: ""
+body-classes: listing-page
+listing:
+  id: resources
+  contents:
+    - r-setup.qmd
+    - intro-to-r.qmd
+    - setup-checklist.qmd
+    - submitting-your-work.qmd
+  sort: "order"
+  type: default
+  template: ../_cards.ejs
+  fields: [title, description, order, unit, kind]
+---

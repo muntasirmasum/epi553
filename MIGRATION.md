@@ -2,12 +2,12 @@
 
 How the EPI 553 lecture notes moved from RPubs to <https://epi553.muntasirmasum.com>, how to keep working on the site, and what is left to do.
 
-## Status (November 2, 2026)
+## Status (November 12, 2026)
 
 - **Live:** <https://epi553.muntasirmasum.com>, served by GitHub Pages from the `gh-pages` branch of [muntasirmasum/epi553](https://github.com/muntasirmasum/epi553). HTTPS is enforced.
 - **DNS:** CNAME record `epi553 → muntasirmasum.github.io` in Vercel DNS for muntasirmasum.com. The main site and its other records are unchanged.
-- **Converted:** Simple Linear Regression (Lecture 05).
-- **Remaining:** 17 lectures, 3 labs, and the resource pages (listed below).
+- **Converted:** Lectures 01 to 05, Labs 1 to 3, and the four resource pages (Batch 1, published November 12, 2026).
+- **Remaining:** Lectures 06 to 18 in three batches: linear regression (06 to 11), logistic models (12 to 15), and counts, survival, and visualization (16 to 18). Each batch is converted, checked, reviewed by Muntasir, then published.
 - **Local copy:** `~/epi553`, also reachable as `epi553-site` inside the Spring 2027 `epi553` folder. The Spring 2026 sources are reachable as `Epi 553` in the same folder.
 
 ## Why this setup
@@ -42,8 +42,8 @@ Repeat this for each remaining lecture. Simple Linear Regression (`lectures/simp
 
 1. **Find the published source.** Each lecture folder in `Epi 553/Lectures Notes/` has an `rsconnect/documents/<file>/rpubs.com/rpubs/Publish Document.dcf`. The `.Rmd` named there is the version that went to RPubs. Keep its rendered HTML open for comparison.
 2. **Copy it** to `lectures/<slug>.qmd`, using a short lowercase slug (for example `multiple-linear-regression`).
-3. **Convert chunk options** to `#|` lines: in R, run `knitr::convert_chunk_header("lectures/<slug>.qmd", type = "yaml")`. Delete the `output:` block.
-4. **Set the front matter** like the pilot: `title`, a one-sentence `subtitle`, a `description` for the lecture card, `lecture` (course order number), `unit`, `categories`, `author`, `date-modified: last-modified`, `execute: warning/message: false`, `fig-width: 8`, `fig-height: 5`.
+3. **Run the mechanical conversion:** `python3 tools/convert/rmd_to_qmd.py <source.Rmd> lectures/<slug>.qmd` (front matter, headings down one level, rules removed, `%>%` to `|>`, labeled blockquotes to callouts). Then convert chunk options to `#|` lines: in R, run `knitr::convert_chunk_header("lectures/<slug>.qmd", type = "yaml")`.
+4. **Set the front matter:** `title`, a one-sentence `subtitle`, a `description` for the lecture card, `order` (course order number; it sorts the sidebar, the listing, and previous/next), `unit`, and `categories`. Author, dates, execute options, and figure size come from `lectures/_metadata.yml` (and the same file in `labs/` and `resources/`).
 5. **Restructure for the site:**
    - Shift headings down one level (`#` becomes `##`); the title is the only top-level heading.
    - Remove `---` horizontal rules.
@@ -62,8 +62,9 @@ Repeat this for each remaining lecture. Simple Linear Regression (`lectures/simp
 9. **Accessibility:**
    - Render once, open each PNG in `_site/lectures/<slug>_files/figure-html/`, and write a `fig-alt` for every figure that states the chart type, axes, and the pattern a student should see.
    - Interactive plotly figures cannot take `fig-alt`. Add a `[Figure description: ...]{.visually-hidden}` line after the chunk.
-   - Run the checker (below) and fix every violation.
-10. **Add it to the sidebar** in `_quarto.yml` under `Lectures`, in course order.
+   - When a figure's numbers can change with the data, compute the alt text: `#| fig-alt: !expr sprintf("... %.1f ...", value)`. The objects must exist before the chunk runs, and the expression must not contain a colon followed by a space (YAML reads it as a key).
+   - Run the checker (below) and fix every violation, in light and dark mode at 1280 and 320 pixels wide.
+10. **Nothing to add to the sidebar:** it lists every `lectures/*.qmd` (and `labs/lab-*.qmd`, `resources/*.qmd`) and sorts by `order`. Student templates go in `labs/templates/template-*.qmd` or `resources/templates/`, which are copied to the site but not rendered.
 11. **Check against the published version.** Compare key numbers (coefficients, odds ratios, p-values, test statistics) with the RPubs HTML. Read every sentence that states a conclusion: hard-coded words like "reject" or "significant" must agree with the numbers. Make them follow the result with inline R, as in the pilot's hypothesis test.
 12. **Publish** (workflow above).
 
@@ -87,10 +88,6 @@ Paths are relative to `Spring 2026/Epi 553/Lectures Notes/`. Lecture numbers fol
 
 | # | Lecture | Published source | Data | Notes |
 |---|---------|------------------|------|-------|
-| 01 | Review of EPI 552 | `epi553_review552.Rmd` | Simulated | Uses `theme: cosmo`; date uses `Sys.Date()` |
-| 02 | Analysis of Variance (ANOVA) | `ANOVA/files2/anova_lecture_Feb3.Rmd` | NHANES package | A newer copy in `ANOVA/files_Feb1/` differs by one comment |
-| 03 | Matrix Algebra for Regression | `Matrix Algebra/Matrix_Algebra_Lecture.Rmd` | NHANES package | Ignore the older duplicate at the folder root |
-| 04 | Statistical Modeling in Epidemiology | `Modeling/Modeling_Lecture.Rmd` | BRFSS 2023 | Reference sample `brfss_subset_2023.rds` |
 | 06 | Multiple Linear Regression | `Multiple Linear Regression/MLR_Lecture.Rmd` | BRFSS 2020 | Source was edited after its last publish; compare carefully |
 | 07 | Tests of Hypotheses in MLR | `Tests of Hypotheses/Tests_of_Hypotheses_Lecture.Rmd` | BRFSS 2020 | Read the MLR sample in Spring 2026 |
 | 08 | Dummy Variables | `Dummy Variables/Dummy_Variables_Lecture.Rmd` | BRFSS 2020 | |
@@ -103,31 +100,23 @@ Paths are relative to `Spring 2026/Epi 553/Lectures Notes/`. Lecture numbers fol
 | 15 | Logistic Regression Applications | `Logistic Regression Applications/Logistic_Regression_Applications_Lecture.Rmd` | BRFSS 2020 | Read Part 1's sample |
 | 16 | Poisson Regression | `Poisson and Survival/Poisson_Regression_Lecture.Rmd` | BRFSS 2020 | Read Part 1's sample; no local HTML, compare with RPubs |
 | 17 | Survival Analysis | `Poisson and Survival/Survival_Analysis_Lecture.Rmd` | `survival::lung` | No local HTML, compare with RPubs |
-| 18 | Data Visualization in R | `Data Visualization/Data_Visualization_Lecture.Rmd` | Several packages | `tigris` needs internet; add `waffle` with `uvr add cran/waffle@master`; link the existing slide deck at muntasirmasum.github.io/epi553-data-viz |
+| 18 | Data Visualization in R | `Data Visualization/Data_Visualization_Lecture.Rmd` | Several packages | `tigris` needs internet; `waffle` is already in `uvr.toml` (from `cran/waffle@master`); link the existing slide deck at muntasirmasum.github.io/epi553-data-viz |
 
-Labs and resources:
-
-| Page | Source (relative to `Spring 2026/Epi 553/`) | Goes in |
-|------|---------------------------------------------|---------|
-| Lab 1: Exploring NHANES | `In-Class R Lab Activities/EPI553_Lab01_NHANES_DataExploration.Rmd` | `labs/` |
-| Lab 2: ANOVA | `Lectures Notes/ANOVA/files_Feb1/anova_lab_activity_student.Rmd` | `labs/` |
-| Lab 3: Correlation | `Lectures Notes/Correlation/Correlation_Lab_Spring2026.Rmd` | `labs/` |
-| Intro to R | `Lectures Notes/EPI553_Intro_to_R_Jan22.qmd` (drop its missing `style.css`) | `resources/` |
-| R setup check | `Week 1 R Setup Chunk/Week1_Setup_Check.Rmd` (remove RPubs steps) | `resources/` |
-| Setup and workflow checklist | `Assignments/Ungraded Assignment/Setup_Workflow_Checklist.Rmd` (remove RPubs steps) | `resources/` |
-| Submitting your work | New page replacing the RPubs quick guide: render with embedded resources, upload `.qmd` and HTML to Brightspace | `resources/` |
-
-Each lab page should offer a downloadable project `.zip` (the lab `.qmd`, with the brfssdata code at the top).
+Labs and resources are all converted (Batch 1). Each lab page offers its student template (`labs/templates/template-*.qmd`) as a download; brfssdata replaced the data zips.
 
 ## Never publish
 
-TA lab solutions (`*_Lab_Solution_TA.*`), anything in `Final Paper/` (student work), quizzes, exams, raw XPT files, `rsconnect/` folders, and `*_cache/` folders.
+TA lab solutions (`*_Lab_Solution_TA.*`), anything in `Final Paper/` (student work), quizzes, exams, grading rubrics (Lab 2's TA rubric was removed from the student page), raw XPT files, `rsconnect/` folders, `*_cache/` folders, and the personal PDF in `Lectures Notes/` (`Confirmation - Wells Fargo.pdf`).
 
 ## Other to-dos
 
 - **Your website.** Change the RPubs card on muntasirmasum.com's teaching page to a "Course sites" list linking <https://epi553.muntasirmasum.com>. Work in `Summer 2026/academic-website/design-port` (current); `~/academic-website` is behind and needs `git pull` first. The card is at `teaching.html` lines 80 to 83; `DEPLOY.md` line 15 mentions RPubs. Pushing to `main` redeploys on Vercel.
 - **Brightspace.** Point the Spring 2027 course shell to the new lecture addresses.
-- **TA lab solution.** Regenerate the Simple Linear Regression solution from the lecture's sample. The lab now uses the lecture's 3,000 adults, and the published version's conclusion was wrong (see below).
+- **TA lab solutions.** Regenerate these from the new pages before the labs are used:
+  - Simple Linear Regression: the lab now uses the lecture's 3,000 adults, and the published version's conclusion was wrong (see below).
+  - Lab 1 (adults only now) and Lab 2 (Part A drops underweight adults; Part B uses the 2009-2010 cycle only).
+  - The Statistical Modeling lab (the BRFSS 2023 sample was redefined).
+  The Batch 1 change log lists every content change.
 - **Content to review in the pilot.**
   - The learning objectives are new text.
   - Section 8.2 calls the residual curve "very slight", but it bends from about -5 to +1.5.
@@ -148,8 +137,4 @@ Copy `_extensions/muntasirmasum/course/` (theme, brand, accessibility fixes) int
 
 ## Known small issues
 
-- The sidebar section labels are not uppercase; the CSS selector for them does not match Quarto's markup.
-- The lecture-card template prints "undefined" if a lecture lacks `lecture` or `unit` in its front matter.
-- Lecture order is set in three places (the `lecture` field, the sidebar list, and previous/next links).
 - The footer year (© 2026) is hard-coded in `_quarto.yml`.
-- Collapsible callout headers use the browser's default focus outline instead of the theme's.

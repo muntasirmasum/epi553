@@ -2,20 +2,9 @@
 title: "Simple Linear Regression"
 subtitle: "Fit, interpret, and check a straight-line model for a continuous outcome."
 description: "Least squares, R², t and F tests, confidence versus prediction intervals, and residual diagnostics, using BMI and age in BRFSS 2020."
-lecture: 5
+order: 5
 unit: "Linear regression"
 categories: [Linear regression]
-author:
-  - name: Muntasir Masum
-    url: https://muntasirmasum.com
-    orcid: 0000-0002-4210-2844
-    affiliation: University at Albany, SUNY
-date-modified: last-modified
-execute:
-  warning: false
-  message: false
-fig-width: 8
-fig-height: 5
 ---
 
 ```{r}

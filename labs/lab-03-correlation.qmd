@@ -1,0 +1,633 @@
+---
+title: "Lab 3: Correlation Analysis"
+subtitle: "Measure how strongly two continuous variables move together, and test it."
+description: "Pearson and Spearman correlation, scatter plots, hypothesis tests, and a correlation matrix, using age, BMI, and blood pressure in NHANES."
+order: 3
+unit: "Foundations"
+categories: [Labs]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+**Time:** about 30 minutes. **Goal:** practice correlation analysis from start to finish using real public health data.
+
+- Understand when and why to use correlation analysis
+- Calculate and interpret Pearson correlation coefficients
+- Test hypotheses about correlation
+- Check correlation assumptions
+- Distinguish between correlation and causation
+- Use Spearman correlation for non-normal data
+:::
+
+**Structure:** **Part A** has guided examples to follow along with; **Part B** is independent practice in your own file.
+
+::: {.data-card}
+[Lab files]{.eyebrow}
+
+Do Part B in your own `.qmd` file. The template has the YAML header, the data code, and the problems ready to fill in.
+
+[Download the Lab 3 template (.qmd)](templates/template-lab-03-correlation.qmd){.btn .btn-sm .btn-outline-primary download="lab-03-correlation.qmd"}
+:::
+
+**Submission:** Render your Part B file and upload both the `.qmd` and the HTML file to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(knitr)
+library(broom)      # For clean statistical output
+library(corrplot)
+library(NHANES)
+
+# Strength label from |r|, using the scale in the Background section
+strength <- function(r) {
+  a <- abs(r)
+  ifelse(a >= 0.7, "strong", ifelse(a >= 0.3, "moderate", "weak"))
+}
+direction <- function(r) ifelse(r > 0, "positive", "negative")
+fmt_p <- function(p) ifelse(p < 0.001, "p < 0.001", paste0("p = ", formatC(p, format = "f", digits = 3)))
+```
+
+## Background: Why Correlation Matters
+
+### What is Correlation?
+
+**Correlation** measures the strength and direction of the LINEAR relationship between two continuous variables.
+
+- **Range:** -1 ≤ r ≤ 1
+- **r = 1:** Perfect positive relationship (as X ↑, Y ↑)
+- **r = -1:** Perfect negative relationship (as X ↑, Y ↓)  
+- **r = 0:** No linear relationship
+- **|r| > 0.7:** Strong correlation
+- **0.3 < |r| < 0.7:** Moderate correlation
+- **|r| < 0.3:** Weak correlation
+
+### When to Use Correlation
+
+**Use correlation when:**
+
+- Both variables are continuous (or at least ordinal)
+- You want to measure strength/direction of linear relationship
+- You're exploring data before regression
+- You want to describe associations (not causation)
+
+**Don't use it when:**
+
+- One variable is categorical → use t-test or ANOVA
+- Relationship is clearly non-linear → consider transformation
+- You want to establish causation → use experimental design
+- You want to predict values → use regression
+
+::: {.callout-warning}
+## Correlation is not causation
+
+Just because two variables are correlated does NOT mean one causes the other!
+
+**Classic Example:** Ice cream sales and drowning deaths are highly correlated. Does ice cream cause drowning? NO! Both increase in summer (confounding by temperature/season).
+:::
+
+## PART A: GUIDED EXAMPLES
+
+### Setup: Load Packages and Data
+
+```{r}
+#| label: load-data
+# Load NHANES data
+data(NHANES)
+
+# Select adult participants with complete data
+nhanes_adult <- NHANES |>
+  filter(Age >= 18, Age <= 80) |>
+  select(Age, Weight, Height, BMI, BPSysAve, BPDiaAve, 
+         Pulse, PhysActive, SleepHrsNight) |>
+  na.omit()
+
+# Display sample
+# Display sample size
+data.frame(
+  Metric = "Sample Size",
+  Value = paste(nrow(nhanes_adult), "adults")
+) |>
+  kable()
+
+head(nhanes_adult, 8) |>
+  kable(digits = 1, caption = "NHANES Adult Data Sample")
+```
+
+**Dataset Description:**
+
+- `Age`: Age in years
+- `Weight`: Weight in kg
+- `Height`: Standing height in cm
+- `BMI`: Body Mass Index (kg/m²)
+- `BPSysAve`: Average systolic blood pressure (mmHg)
+- `BPDiaAve`: Average diastolic blood pressure (mmHg)
+- `Pulse`: 60 second pulse rate
+- `PhysActive`: Physically active (Yes/No)
+- `SleepHrsNight`: Hours of sleep per night
+
+The `NHANES` package resamples the 2009-2012 surveys for teaching (some participants appear more than once, and no survey weights are used), so these correlations describe this sample, not the US population.
+
+### Example 1: Age and Blood Pressure
+
+#### Research Question
+
+**Is there a correlation between age and systolic blood pressure among US adults?**
+
+**Public Health Context:** Understanding age-related changes in blood pressure helps identify at-risk populations and inform screening guidelines.
+
+#### Step 1: Visualize the Relationship
+
+**Always start with a scatterplot!**
+
+```{r}
+#| label: fig-age-sbp
+#| fig-cap: "Age and systolic blood pressure, NHANES adults"
+#| fig-alt: !expr sprintf("Scatter plot of systolic blood pressure against age for %s adults, with a red linear fit and confidence band. Ages run from 18 to 80 and systolic pressure mostly from about 90 to 160 mmHg. The line rises steadily with age and the points form a wide cloud around it (r = %.2f).", format(nrow(nhanes_adult), big.mark = ","), cor(nhanes_adult$Age, nhanes_adult$BPSysAve))
+# Create scatterplot
+ggplot(nhanes_adult, aes(x = Age, y = BPSysAve)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Age vs Systolic Blood Pressure",
+    subtitle = "NHANES Data, Adults 18-80 years",
+    x = "Age (years)",
+    y = "Systolic Blood Pressure (mmHg)"
+  ) +
+  theme_minimal()
+```
+
+**What we observe:**
+
+- Positive trend: older adults tend to have higher blood pressure
+- Points scattered around the line (not perfect relationship)
+- Relationship appears roughly linear
+- Some variability at all age levels
+
+#### Step 2: Calculate Correlation
+
+```{r}
+#| label: example1-correlation
+# Calculate Pearson correlation
+cor_age_bp <- cor.test(nhanes_adult$Age, nhanes_adult$BPSysAve)
+
+# Display results in clean table
+tidy(cor_age_bp) |>
+  select(estimate, statistic, p.value, conf.low, conf.high) |>
+  kable(
+    digits = 3,
+    col.names = c("r", "t-statistic", "p-value", "95% CI Lower", "95% CI Upper"),
+    caption = "Pearson Correlation: Age and Systolic BP"
+  )
+```
+
+#### Step 3: Interpret Results
+
+**Hypothesis Test:**
+
+- **H₀:** ρ = 0 (no correlation between age and BP in population)
+- **H₁:** ρ ≠ 0 (correlation exists)
+- **α = 0.05**
+
+**Results:**
+
+- **r = `r round(cor_age_bp$estimate, 3)`:** `r strength(cor_age_bp$estimate)` `r direction(cor_age_bp$estimate)` correlation
+- **`r fmt_p(cor_age_bp$p.value)`:** `r ifelse(cor_age_bp$p.value < 0.05, "Statistically significant (reject H₀)", "Not statistically significant (fail to reject H₀)")`
+- **95% CI [`r round(cor_age_bp$conf.int[1], 3)`, `r round(cor_age_bp$conf.int[2], 3)`]:** `r ifelse(cor_age_bp$conf.int[1] > 0 | cor_age_bp$conf.int[2] < 0, "Does not contain zero, consistent with the test", "Contains zero, consistent with the test")`
+
+```{r}
+#| label: example1-interpret
+# Calculate r-squared
+r_squared <- cor_age_bp$estimate^2
+
+data.frame(
+  Measure = c("Correlation (r)", "Coefficient of Determination (r²)", 
+              "Variance Explained"),
+  Value = c(
+    round(cor_age_bp$estimate, 3),
+    round(r_squared, 3),
+    paste0(round(r_squared * 100, 1), "%")
+  )
+) |>
+  kable(caption = "Summary of Correlation Strength")
+```
+
+**Interpretation:**
+
+There is a `r ifelse(cor_age_bp$p.value < 0.05, "statistically significant", "non-significant")` `r strength(cor_age_bp$estimate)` `r direction(cor_age_bp$estimate)` correlation between age and systolic blood pressure. As age increases, systolic BP tends to increase. However, age explains only about `r round(r_squared * 100, 1)`% of the variation in BP, suggesting other factors also play important roles.
+
+**Public Health Implication:** Age-appropriate BP screening is important, but individual risk assessment should consider multiple factors beyond age alone.
+
+#### Step 4: Check Assumptions
+
+**Assumption 1: Linearity** (already checked with the scatterplot)
+
+**Assumption 2: Bivariate Normality**
+
+```{r}
+#| label: fig-qq-age-sbp
+#| fig-cap: "Normal Q-Q plots for age and systolic blood pressure"
+#| fig-alt: "Two normal Q-Q plots side by side. For age, the points form an S shape that is flat at both ends, showing ages spread evenly from 18 to 80 rather than bell-shaped. For systolic blood pressure, the points follow the red line in the middle and curve upward in the upper tail, showing right skew."
+#| fig-height: 4
+# Q-Q plots for normality
+par(mfrow = c(1, 2))
+
+qqnorm(nhanes_adult$Age, main = "Q-Q Plot: Age")
+qqline(nhanes_adult$Age, col = "red")
+
+qqnorm(nhanes_adult$BPSysAve, main = "Q-Q Plot: Systolic BP")
+qqline(nhanes_adult$BPSysAve, col = "red")
+
+par(mfrow = c(1, 1))
+```
+
+**Assessment:** Systolic BP follows the red line in the middle but curves upward in the upper tail (right skew). Age is not normal at all: the S-shaped Q-Q plot reflects ages spread fairly evenly from 18 to 80. With a large sample (n = `r format(nrow(nhanes_adult), big.mark = ",")`), the test of r is robust to these departures, and Spearman's correlation (Example 4) does not assume normality.
+
+**Assumption 3: No Extreme Outliers** (check the scatterplot for points far from the rest)
+
+### Example 2: BMI and Diastolic Blood Pressure
+
+#### Research Question
+
+**Is BMI correlated with diastolic blood pressure?**
+
+**Why this matters:** Understanding the relationship between obesity and blood pressure helps inform weight management interventions.
+
+#### Step 1: Visualize
+
+```{r}
+#| label: fig-bmi-dbp
+#| fig-cap: "BMI and diastolic blood pressure, NHANES adults"
+#| fig-alt: !expr sprintf("Scatter plot of diastolic blood pressure against BMI with a red linear fit. The points form a broad cloud, mostly at BMI 18 to 45 and diastolic pressure 50 to 90 mmHg, with a few readings at 0, and the line rises only slightly (r = %.2f).", cor(nhanes_adult$BMI, nhanes_adult$BPDiaAve))
+ggplot(nhanes_adult, aes(x = BMI, y = BPDiaAve)) +
+  geom_point(alpha = 0.3, color = "darkgreen") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", fill = "pink") +
+  labs(
+    title = "BMI vs Diastolic Blood Pressure",
+    x = "Body Mass Index (kg/m²)",
+    y = "Diastolic Blood Pressure (mmHg)"
+  ) +
+  theme_minimal()
+```
+
+**Observation:** The fitted line rises only slightly and the points are widely scattered around it.
+
+#### Step 2: Calculate Correlation
+
+```{r}
+#| label: example2-correlation
+# Pearson correlation
+cor_bmi_bp <- cor.test(nhanes_adult$BMI, nhanes_adult$BPDiaAve)
+
+# Display results
+tidy(cor_bmi_bp) |>
+  select(estimate, statistic, p.value, conf.low, conf.high) |>
+  kable(
+    digits = 3,
+    col.names = c("r", "t-statistic", "p-value", "95% CI Lower", "95% CI Upper"),
+    caption = "Pearson Correlation: BMI and Diastolic BP"
+  )
+
+# Calculate r-squared
+r_squared_bmi <- cor_bmi_bp$estimate^2
+
+data.frame(
+  Measure = c("r²", "Variance Explained"),
+  Value = c(
+    round(r_squared_bmi, 4),
+    paste0(round(r_squared_bmi * 100, 2), "%")
+  )
+) |>
+  kable(caption = "Effect Size")
+```
+
+**Interpretation:**
+
+- **`r tools::toTitleCase(strength(cor_bmi_bp$estimate))` `r direction(cor_bmi_bp$estimate)` correlation (r = `r round(cor_bmi_bp$estimate, 3)`)** between BMI and diastolic BP
+- **`r ifelse(cor_bmi_bp$p.value < 0.05, "Statistically significant", "Not statistically significant")`** (`r fmt_p(cor_bmi_bp$p.value)`)
+- **BMI explains only `r round(r_squared_bmi * 100, 1)`%** of variation in diastolic BP
+
+**Key Insight:** With `r format(nrow(nhanes_adult), big.mark = ",")` people, even a weak correlation is statistically significant. BMI alone explains `r ifelse(r_squared_bmi < 0.10, "less than 10%", "only part")` of BP variation; other factors (genetics, diet, physical activity, stress, age) play substantial roles.
+
+### Example 3: Correlation Matrix
+
+#### Research Question
+
+**How are cardiovascular health indicators related to each other?**
+
+#### Step 1: Calculate Correlation Matrix
+
+```{r}
+#| label: example3-matrix
+# Select cardiovascular variables
+cardio_vars <- nhanes_adult |>
+  select(Age, BMI, BPSysAve, BPDiaAve, Pulse)
+
+# Calculate correlation matrix
+cor_matrix <- cor(cardio_vars, use = "complete.obs")
+
+# Display as table
+cor_matrix |>
+  kable(digits = 3, caption = "Cardiovascular Health Correlation Matrix")
+```
+
+#### Step 2: Visualize Correlation Matrix
+
+```{r}
+#| label: corr-alt-text
+#| include: false
+pairs <- which(lower.tri(cor_matrix), arr.ind = TRUE)
+corr_alt <- paste0(
+  "Lower-triangle correlation plot for age, BMI, systolic BP, diastolic BP, ",
+  "and pulse, with circles sized and colored by correlation (blue negative, ",
+  "red positive) and the value printed in each. Correlations: ",
+  paste(sprintf("%s and %s %.2f", rownames(cor_matrix)[pairs[, 1]],
+                colnames(cor_matrix)[pairs[, 2]], cor_matrix[pairs]),
+        collapse = "; "), ".")
+```
+
+```{r}
+#| label: fig-corrplot
+#| fig-cap: "Correlation matrix of cardiovascular indicators"
+#| fig-alt: !expr corr_alt
+#| fig-height: 6
+#| fig-width: 8
+# Create correlation plot
+corrplot(cor_matrix, 
+         method = "circle",
+         type = "lower",
+         tl.col = "black",
+         tl.srt = 45,
+         addCoef.col = "black",
+         number.cex = 0.7,
+         col = colorRampPalette(c("#3498db", "white", "#e74c3c"))(200),
+         title = "Cardiovascular Health Correlations",
+         mar = c(0,0,2,0))
+```
+
+**Key Findings:**
+
+```{r}
+#| label: example3-summary
+# Create summary table of notable correlations
+data.frame(
+  Relationship = c(
+    "Systolic BP & Diastolic BP",
+    "Age & Systolic BP",
+    "Age & Diastolic BP",
+    "BMI & Systolic BP",
+    "BMI & Pulse"
+  ),
+  Correlation = c(
+    round(cor_matrix["BPSysAve", "BPDiaAve"], 3),
+    round(cor_matrix["Age", "BPSysAve"], 3),
+    round(cor_matrix["Age", "BPDiaAve"], 3),
+    round(cor_matrix["BMI", "BPSysAve"], 3),
+    round(cor_matrix["BMI", "Pulse"], 3)
+  ),
+  Strength = strength(c(
+    cor_matrix["BPSysAve", "BPDiaAve"], cor_matrix["Age", "BPSysAve"],
+    cor_matrix["Age", "BPDiaAve"], cor_matrix["BMI", "BPSysAve"],
+    cor_matrix["BMI", "Pulse"]))
+) |>
+  kable(caption = "Notable Correlations Summary")
+```
+
+```{r}
+#| label: example3-strongest
+#| echo: false
+off <- cor_matrix
+off[upper.tri(off, diag = TRUE)] <- NA
+idx <- which(abs(off) == max(abs(off), na.rm = TRUE), arr.ind = TRUE)
+strongest <- c(rownames(off)[idx[1, 1]], colnames(off)[idx[1, 2]])
+pulse_max <- max(abs(cor_matrix["Pulse", colnames(cor_matrix) != "Pulse"]))
+```
+
+**Interpretation:** The strongest correlation in this matrix is between `r strongest[2]` and `r strongest[1]` (r = `r round(cor_matrix[strongest[1], strongest[2]], 3)`, `r strength(cor_matrix[strongest[1], strongest[2]])`). Systolic and diastolic BP are correlated at r = `r round(cor_matrix["BPSysAve", "BPDiaAve"], 3)`: they come from the same measurement, but they respond differently to age, so the correlation is only `r strength(cor_matrix["BPSysAve", "BPDiaAve"])`. Pulse rate's correlations with the other variables are all `r strength(pulse_max)` (largest |r| = `r round(pulse_max, 3)`), suggesting it is influenced by different factors.
+
+### Example 4: Spearman vs Pearson
+
+#### When to Use Spearman Correlation
+
+Use **Spearman's rank correlation** when:
+
+- Data are ordinal (ranked)
+- Relationship is monotonic but not linear
+- Data contain outliers
+- Normality assumption is violated
+
+#### Example: Age vs Pulse Rate
+
+```{r}
+#| label: fig-age-pulse
+#| fig-cap: "Age and pulse rate, NHANES adults"
+#| fig-alt: !expr sprintf("Scatter plot of pulse rate against age with a red linear fit. Pulse mostly falls between 50 and 100 beats per minute at every age, and the line slopes gently downward (Pearson r = %.2f).", cor(nhanes_adult$Age, nhanes_adult$Pulse))
+# Visualize relationship
+ggplot(nhanes_adult, aes(x = Age, y = Pulse)) +
+  geom_point(alpha = 0.3, color = "purple") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Age vs Pulse Rate",
+    x = "Age (years)",
+    y = "Pulse Rate (bpm)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#| label: example4-comparison
+# Calculate both correlations
+pearson_r <- cor.test(nhanes_adult$Age, nhanes_adult$Pulse, method = "pearson")
+spearman_r <- cor.test(nhanes_adult$Age, nhanes_adult$Pulse, method = "spearman")
+
+# Compare in table
+data.frame(
+  Method = c("Pearson", "Spearman"),
+  Correlation = c(
+    round(pearson_r$estimate, 3),
+    round(spearman_r$estimate, 3)
+  ),
+  p_value = c(
+    format.pval(pearson_r$p.value),
+    format.pval(spearman_r$p.value)
+  ),
+  Difference = c(
+    "-",
+    round(abs(pearson_r$estimate - spearman_r$estimate), 3)
+  )
+) |>
+  kable(caption = "Pearson vs Spearman Comparison")
+```
+
+**Interpretation:**
+
+- Pearson and Spearman differ by `r round(abs(pearson_r$estimate - spearman_r$estimate), 3)``r ifelse(abs(pearson_r$estimate - spearman_r$estimate) < 0.02, ", so the results are very similar", "")`
+- Both show a `r strength(pearson_r$estimate)` `r direction(pearson_r$estimate)` correlation
+- With a large sample and only mild assumption violations, either method is appropriate
+- For this data, Pearson is fine (and has better statistical power)
+
+### Key Takeaways from Examples
+
+1. **Always visualize first** - scatterplots reveal patterns correlation coefficients miss
+2. **Context matters** - statistical significance ≠ practical importance
+3. **Correlation ≠ Causation** - always consider confounding
+4. **r² tells you explained variance** - even significant correlations may explain little
+5. **Check assumptions** - especially for small samples
+
+## PART B: YOUR TURN - Practice Problems
+
+Now it's your turn to practice! Use the same NHANES dataset and follow the examples above.
+
+**Total Points: 25 points**
+
+### Problem 1: Weight and Height (10 points)
+
+**Research Question:** Is there a correlation between weight and height among US adults?
+
+**Your tasks:**
+
+a. Create a scatterplot with a fitted line (2 points)
+b. Calculate Pearson correlation using `cor.test()` and display with `tidy()` (3 points)
+c. Test for statistical significance and state your conclusion (2 points)
+d. Calculate r² and interpret in 2-3 sentences (3 points)
+
+```{r}
+#| label: problem1
+#| eval: false
+# YOUR CODE HERE
+
+# a. Scatterplot
+
+# b. Correlation test with tidy() display
+
+# c. Statistical significance
+
+# d. r² and interpretation (write as comment)
+# 
+```
+
+### Problem 2: Correlation Matrix Analysis (10 points)
+
+**Research Question:** What are the relationships among BMI, weight, and height?
+
+**Your tasks:**
+
+a. Create a correlation matrix for: Weight, Height, BMI (3 points)
+b. Visualize the matrix using corrplot (3 points)
+c. Identify which pair has the strongest correlation (2 points)
+d. Explain why that correlation makes sense biologically/mathematically (2 points)
+
+```{r}
+#| label: problem2
+#| eval: false
+# YOUR CODE HERE
+
+# a. Correlation matrix
+
+# b. Visualize with corrplot
+
+# c. Strongest correlation:
+
+# d. Explanation (write as comment)
+# 
+```
+
+### Problem 3: Sleep and Age (5 points)
+
+**Research Question:** Is there a relationship between hours of sleep and age?
+
+**Your tasks:**
+
+a. Create a scatterplot (1 point)
+b. Calculate Pearson correlation and display with `tidy()` (2 points)
+c. Interpret whether the relationship is statistically significant (2 points)
+
+```{r}
+#| label: problem3
+#| eval: false
+# YOUR CODE HERE
+
+# a. Scatterplot
+
+# b. Correlation with tidy()
+
+# c. Interpretation (write as comment)
+# 
+```
+
+### Bonus (Optional, 5 extra points)
+
+**Challenge:** Investigate the relationship between two variables of your choice from the NHANES dataset. Include:
+
+- Scatterplot
+- Correlation test with clean display
+- Assumption checks
+- Thoughtful interpretation
+
+```{r}
+#| label: bonus
+#| eval: false
+# YOUR CODE HERE
+
+```
+
+## Grading Rubric
+
+### Problem 1: Weight and Height (10 points)
+
+- a. Scatterplot properly formatted with labels: **2 points**
+- b. Correct correlation with clean display: **3 points**
+- c. Significance test correctly interpreted: **2 points**
+- d. r² calculated and interpreted: **3 points**
+
+### Problem 2: Correlation Matrix (10 points)
+
+- a. Correct matrix calculated: **3 points**
+- b. Well-formatted correlation plot: **3 points**
+- c. Strongest correlation identified: **2 points**
+- d. Biological/mathematical explanation: **2 points**
+
+### Problem 3: Sleep and Age (5 points)
+
+- a. Scatterplot: **1 point**
+- b. Correlation calculated and displayed: **2 points**
+- c. Interpretation of significance: **2 points**
+
+## Submission Instructions
+
+1. **Save your work** with your name: `LastName_FirstName_Lab03.qmd` (start from the template above).
+2. **Render** it to HTML: the **Preview** button in Positron, or **Render** in RStudio. The template's YAML header already has `embed-resources: true`.
+3. **Submit to Brightspace:** upload both the `.qmd` and the HTML file. See [Submitting your work](../resources/submitting-your-work.qmd).
+4. **Due:** End of class today. Grading policies are in the syllabus on Brightspace.
+
+## Additional Resources
+
+### R Functions Used Today
+
+- `cor.test()` - Calculate correlation and test significance
+- `tidy()` - Clean display of statistical test results
+- `cor()` - Calculate correlation matrix
+- `corrplot()` - Visualize correlation matrix
+- `ggplot() + geom_point()` - Scatterplots
+- `geom_smooth(method="lm")` - Add fitted regression line
+- `qqnorm()` / `qqline()` - Check normality
+
+### For More Help
+
+- **Textbook:** Chapter 6 - Correlation Analysis
+- **Office Hours:** See syllabus
+- **TA Help:** See syllabus  
+- **R Documentation:** Type `?cor.test` in console
+
+::: {.callout-tip}
+## Remember
+
+- Correlation measures LINEAR relationships only
+- Always visualize your data first
+- Correlation ≠ Causation
+- Check your assumptions
+- Consider confounding and alternative explanations
+:::
+
+**Next:** [Matrix Algebra for Regression](../lectures/matrix-algebra.qmd).

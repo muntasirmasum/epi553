@@ -1,0 +1,751 @@
+---
+title: "Introduction to R"
+subtitle: "The R basics you need for EPI 553: the IDE, objects, data frames, packages, and a first analysis."
+description: "Positron and RStudio, R objects and data types, vectors and data frames, packages, the pipe, and a first look at NHANES."
+order: 2
+unit: "Getting started"
+categories: [Resources]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(digits = 4)
+```
+
+## Introduction
+
+### Course Overview
+
+R is a powerful programming language and environment for statistical computing and data visualization. In this course, you will learn:
+
+- How to interact with R using Positron or RStudio
+- Creating and manipulating R objects
+- Working with different data types and structures
+- Loading and working with real datasets
+
+This lecture provides a foundational introduction to R programming that you'll use throughout the course.
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this page, you should be able to:
+
+- Use Positron or RStudio effectively
+- Create and manipulate R objects
+- Understand R data types and structures
+- Write and run R code in scripts
+- Load and explore datasets
+:::
+
+## R Programming Fundamentals
+
+### What is R?
+
+**R is:**
+
+- A programming language for **statistical computing** and **data visualization**
+- **Open-source and free** software
+- A **dynamic programming language** that automatically interprets your code as you run it
+- Platform independent (Windows, Mac, Linux)
+
+An **integrated development environment (IDE)** makes R much easier to use. This course supports two free IDEs from Posit: **Positron** (the newer one, built for data science in R and Python) and **RStudio** (the long-standing R IDE). Everything in these notes works in either; where the steps differ, both are shown.
+
+### Why Learn R?
+
+R has become the standard tool for data analysis and statistical computing in:
+
+- Academic research
+- Data science and analytics
+- Biostatistics and epidemiology
+- Business intelligence
+
+Key advantages include:
+
+- Extensive package ecosystem (more than 20,000 packages)
+- Publication-quality graphics
+- Reproducible research capabilities
+- Strong community support
+
+### Your IDE: Positron or RStudio
+
+Both IDEs show the same four kinds of information, arranged a little differently.
+
+| What it does | Positron | RStudio |
+|---|---|---|
+| Write and save code (`.R`, `.qmd`) | **Editor** (center) | **Source** pane (top left) |
+| Run code and see results | **Console** (bottom) | **Console** (bottom left) |
+| See the objects you created | **Variables** in the Session pane (right) | **Environment** tab (top right) |
+| Files, plots, help, packages | **Explorer** (left), **Plots** (Session pane), **Help**, **Viewer**, and **Packages** panes | **Files / Plots / Packages / Help** (bottom right) |
+
+**Work in a project folder.** Keep everything for one analysis (code, data, output) in one folder. In Positron, use **File → Open Folder**; in RStudio, use **File → New Project**. R then reads and writes files relative to that folder, so you never need `setwd()` and your code runs on any computer.
+
+#### Customizing your workspace
+
+- **Positron:** open **Settings** (Ctrl/Cmd + ,) to change the color theme, fonts, and editor options.
+- **RStudio:** **Tools → Global Options** changes the theme, fonts, and pane layout.
+- A dark theme can reduce eye strain during long coding sessions.
+
+## Working with the Console
+
+### Basic R Commands
+
+The console is where you type commands and see results. Let's start with simple arithmetic:
+
+```{r}
+#| label: basic-arithmetic
+# Simple addition
+1 + 1
+
+# Division
+10 / 2
+
+# Exponentiation
+2 ^ 3
+
+# Square root
+sqrt(16)
+```
+
+### Understanding R Output
+
+Notice the `[1]` prefix in the output. This indicates the **position of the first value** displayed on that line.
+
+```{r}
+#| label: output-index
+# When displaying many values, you see multiple indices
+100:130
+```
+
+Each line of output starts with the position of its first value in square brackets: `[1]` on the first line, and on the next line the position where that line picks up (how many values fit on a line depends on the width of your console).
+
+::: {.callout-tip}
+**Tip:** The `[1]` notation becomes especially useful when working with vectors and matrices where you need to track the position of values.
+:::
+
+### Incomplete Commands
+
+If you type an incomplete command and press Enter, R displays a `+` prompt, waiting for you to complete it:
+
+```{r}
+#| label: incomplete-command-demo
+#| eval: false
+# Type this but don't press Enter after the minus sign
+5 -
+# Then press Enter and the prompt will show +
+# Type 1 and press Enter
+1
+```
+
+When you do this in R, you'll see:
+
+```{r}
+#| label: incomplete-example
+#| eval: false
+> 5 -
++ 1
+[1] 4
+```
+
+To cancel an incomplete command, press **Escape** and start over.
+
+### Error Messages
+
+If you type a command that R doesn't recognize, you'll get an error message:
+
+```{r}
+#| label: error-example
+#| eval: false
+> 3 % 5
+Error: unexpected input in "3 % 5"
+```
+
+::: {.callout-warning}
+Error messages are helpful! They tell you what went wrong. Don't be intimidated by them: they're just R's way of saying it didn't understand your command. The `%` operator is used for different purposes in R, and `3 % 5` is not valid syntax.
+:::
+
+### Canceling Long-Running Commands
+
+Some R commands take a long time to run. To cancel a running command:
+
+- **Positron:** click the interrupt (stop) button in the Console action bar.
+- **RStudio:** press **Esc** with the cursor in the Console, or click the red **STOP** sign at the top of the Console.
+
+Canceling may take a moment.
+
+## R Objects and Assignment
+
+### Creating Objects
+
+R lets you save data by storing it in **objects**. An object is simply a name you can use to retrieve stored data.
+
+You assign values to objects using `<-` or `=`:
+
+```{r}
+#| label: object-creation
+# Create an object named 'a' with value 1
+a <- 1
+
+# View the contents
+a
+
+# Do arithmetic with the object
+a + 2
+
+# Create another object
+b <- 10
+a + b
+```
+
+::: {.callout-tip}
+**Best Practice:** Use `<-` for assignment in R. While `=` also works, `<-` is the R convention and makes your code more readable to other R users.
+:::
+
+#### Reassigning Objects
+
+R will overwrite an object without asking for confirmation:
+
+```{r}
+#| label: object-reassignment
+# First assignment
+a <- 1
+a
+
+# Reassign a new value
+a <- 2
+a
+
+# You can overwrite with different data types
+a <- "text"
+a
+```
+
+### Naming Conventions
+
+Object names in R have a few rules:
+
+**Valid names start with:**
+
+- A letter or period (`.variable_name`)
+- Can contain numbers, letters, underscores, and periods
+
+**Invalid names:**
+
+- Start with a number: `2variables` (not allowed)
+- Contain special symbols: `my-var`, `my$var`, `my@var` (not allowed)
+
+```{r}
+#| label: naming-examples
+#| eval: false
+# Valid names
+my_variable <- 5
+my.variable <- 5
+myVariable <- 5
+x1 <- 10
+
+# Invalid names (these will produce errors)
+1variable <- 5        # Error: starts with number
+my-variable <- 5      # Error: hyphen not allowed
+my variable <- 5      # Error: space not allowed
+```
+
+#### Case Sensitivity
+
+R **is case-sensitive**, so `name` and `Name` are different objects:
+
+```{r}
+#| label: case-sensitivity
+name <- "lowercase"
+Name <- "uppercase"
+
+name
+Name
+```
+
+### Listing Objects in Your Environment
+
+Use `ls()` to see all objects you've created:
+
+```{r}
+#| label: listing-objects
+# Create some objects
+x <- 5
+y <- 10
+z <- "hello"
+
+# List all objects
+ls()
+
+# Remove a specific object
+rm(z)
+
+# Verify it's gone
+ls()
+```
+
+## R Data Types and Structures
+
+### Data Types
+
+R has several basic data types:
+
+#### Numeric
+
+```{r}
+#| label: numeric-data
+# Numeric (default for numbers)
+x <- 3.14
+y <- 42
+
+class(x)
+class(y)
+```
+
+#### Character
+
+```{r}
+#| label: character-data
+# Character (text)
+name <- "Alice"
+greeting <- 'Hello, world!'
+
+class(name)
+class(greeting)
+```
+
+#### Logical
+
+```{r}
+#| label: logical-data
+# Logical (TRUE/FALSE)
+is_patient <- TRUE
+treatment_received <- FALSE
+
+class(is_patient)
+```
+
+### Vectors
+
+A **vector** is a collection of values of the same type. Create vectors using `c()`:
+
+```{r}
+#| label: vectors
+# Numeric vector
+ages <- c(25, 30, 35, 40, 45)
+
+# Character vector
+names <- c("Alice", "Bob", "Carol", "Dave", "Eve")
+
+# Logical vector
+is_smoker <- c(TRUE, FALSE, TRUE, FALSE, TRUE)
+
+# Check length
+length(ages)
+
+# Access individual elements
+names[2]      # Second element
+ages[c(1, 3)] # First and third elements
+```
+
+### Sequences and Repetition
+
+```{r}
+#| label: sequences
+# Create sequences
+1:10           # Sequence from 1 to 10
+seq(1, 10, by = 2)  # Sequence with step
+
+# Repeat values
+rep(1, 5)      # Repeat 1 five times
+rep(c("A", "B"), 3)  # Repeat vector three times
+```
+
+### Lists
+
+A **list** is a collection where elements can have different types:
+
+```{r}
+#| label: lists
+# Create a list
+person <- list(
+  name = "Alice",
+  age = 30,
+  is_student = FALSE
+)
+
+# Access elements
+person$name
+person[[2]]  # Access by position
+person[["age"]]  # Access by name
+
+# View the list structure
+str(person)
+```
+
+### Matrices
+
+A **matrix** is a two-dimensional collection of elements all of the same type:
+
+```{r}
+#| label: matrices
+# Create a 3x3 matrix
+m <- matrix(c(1, 2, 3, 4, 5, 6, 7, 8, 9), nrow = 3, ncol = 3)
+m
+
+# Access elements
+m[1, 2]      # Row 1, Column 2
+m[2, ]       # All of Row 2
+m[, 3]       # All of Column 3
+
+# Matrix operations
+t(m)         # Transpose
+m %*% m      # Matrix multiplication
+```
+
+### Data Frames
+
+**Data frames** are the most important data structure in R for statistical analysis. They're like spreadsheets where:
+
+- Each column is a **variable**
+- Each row is an **observation**
+- Columns can have different data types
+
+```{r}
+#| label: dataframes
+# Create a simple data frame
+df <- data.frame(
+  ID = 1:5,
+  Name = c("Alice", "Bob", "Carol", "Dave", "Eve"),
+  Age = c(28, 35, 42, 31, 29),
+  Diagnosis = c("Yes", "No", "Yes", "No", "No")
+)
+
+df
+
+# Check structure
+str(df)
+
+# Dimensions
+dim(df)
+nrow(df)
+ncol(df)
+```
+
+### Accessing Data Frame Elements
+
+```{r}
+#| label: dataframe-access
+# Access a column using $
+df$Name
+
+# Access by row and column
+df[1, 2]      # Row 1, Column 2
+
+# Access entire column
+df[, "Age"]
+df[, 3]
+
+# Access entire row
+df[2, ]
+
+# Subset rows where Age > 30
+df[df$Age > 30, ]
+```
+
+## Reading Data
+
+### Loading CSV Files
+
+In epidemiological research, you'll usually start with existing data:
+
+```{r}
+#| label: reading-csv
+#| eval: false
+# Read a CSV file
+data <- read.csv("path/to/file.csv")
+
+# If first row contains variable names (default)
+data <- read.csv("data.csv")
+
+# If no header row
+data <- read.csv("data.csv", header = FALSE)
+
+# Specify missing value codes
+data <- read.csv("data.csv", na.strings = c("", "NA", "."))
+```
+
+#### Using an import dialog
+
+**Easier method for point-and-click:**
+
+Both IDEs have a dialog that writes the import code for you. In **Positron**, use **File → Import Data** (also on the Variables pane toolbar, or right-click a data file in the Explorer). In **RStudio**:
+
+1. Click **Environment** tab → **Import Dataset** → **From Text (readr)...**
+2. Browse to your file
+3. Preview the data and adjust settings
+4. Click **Import** - RStudio generates the code
+
+**Copy this code to your script** for reproducibility:
+
+```{r}
+#| label: import-example
+#| eval: false
+# Code generated by RStudio
+library(readr)
+mydata <- read_csv("myfile.csv")
+```
+
+::: {.highlight}
+Always save the import code in your script. This creates a reproducible record of how you loaded your data.
+:::
+
+## R Scripts
+
+### What is an R Script?
+
+An **R script** is a plain text file containing R code. Scripts allow you to:
+
+- Write and save your code
+- Create a reproducible record of your analysis
+- Rerun your entire analysis anytime
+- Share your code with others
+
+#### Creating a New Script
+
+**Positron:** **File → New File...** and choose **R File** (or Quarto Document for a `.qmd`).
+
+**RStudio:** **File → New File → R Script**, or **Ctrl + Shift + N** (Windows/Linux) / **Cmd + Shift + N** (Mac).
+
+### Best Practices for Scripts
+
+#### 1. Add Comments
+
+Use `#` to add comments that explain your code:
+
+```{r}
+#| label: script-example
+# Create sample patient data
+set.seed(123)
+data <- data.frame(
+  age = rnorm(100, mean = 55, sd = 15),
+  weight = rnorm(100, mean = 80, sd = 12),
+  height = rnorm(100, mean = 1.70, sd = 0.10)
+)
+
+# Calculate BMI
+data$BMI <- data$weight / (data$height^2)
+
+# Subset to patients over 50 years old
+older_patients <- data[data$age > 50, ]
+
+# Summarize BMI for older patients
+summary(older_patients$BMI)
+```
+
+#### 2. Organize Your Script
+
+Start with header information and load all packages:
+
+```{r}
+#| label: organized-script
+#| eval: false
+# =====================================================
+# Analysis of NHANES Data
+# Author: Muntasir Masum
+# Date: January 22, 2026
+# =====================================================
+
+# Load required packages
+library(dplyr)
+library(ggplot2)
+library(NHANES)
+
+# -----
+# 1. Load and Prepare Data
+# -----
+data(NHANES)
+head(NHANES)
+
+# -----
+# 2. Exploratory Data Analysis
+# -----
+summary(NHANES)
+NHANES |>
+  group_by(Gender) |>
+  summarise(mean_age = mean(Age, na.rm = TRUE),
+            mean_bp_sys = mean(BPSys1, na.rm = TRUE))
+
+# -----
+# 3. Statistical Tests
+# -----
+t.test(BPSys1 ~ Gender, data = NHANES)
+```
+
+#### 3. Use Meaningful Names
+
+```{r}
+#| label: naming-conventions
+# Good names
+systolic_bp <- 140
+patient_age <- 55
+calculate_bmi <- function(weight, height) { weight / height^2 }
+
+# Poor names
+sb <- 140          # Unclear abbreviation
+a <- 55            # Single letter
+f1 <- function(w, h) { w / h^2 }  # Cryptic
+```
+
+### Running Code from a Script
+
+**Run a single line:**
+
+- Click the line and press **Ctrl + Enter** (Windows/Linux) / **Cmd + Return** (Mac)
+- In RStudio you can also click the **Run** button
+
+**Run multiple lines:**
+
+- Highlight them and press **Ctrl + Enter** / **Cmd + Return**
+
+**Run the entire script:**
+
+- **Positron:** click the **Run** (play) button at the top right of the editor, or **Ctrl + Shift + Enter** / **Cmd + Shift + Return**
+- **RStudio:** click the **Source** button, or **Ctrl + Shift + S** / **Cmd + Shift + S**
+
+## Practical Example
+
+### Complete Workflow
+
+Let's work through a complete analysis workflow using the NHANES (National Health and Nutrition Examination Survey) dataset:
+
+```{r}
+#| label: complete-workflow
+#| message: false
+# Load required packages
+library(NHANES)
+library(dplyr)
+
+# 1. Load the data
+data(NHANES)
+
+# 2. Examine the data
+head(NHANES)
+str(NHANES)
+```
+
+```{r}
+#| label: workflow-continued
+#| message: false
+# 3. Calculate summary statistics by gender
+summary_stats <- NHANES |>
+  group_by(Gender) |>
+  summarise(
+    n = n(),
+    mean_age = mean(Age, na.rm = TRUE),
+    sd_age = sd(Age, na.rm = TRUE),
+    mean_bp_sys = mean(BPSys1, na.rm = TRUE),
+    sd_bp_sys = sd(BPSys1, na.rm = TRUE),
+    mean_bmi = mean(BMI, na.rm = TRUE),
+    sd_bmi = sd(BMI, na.rm = TRUE)
+  )
+
+print(summary_stats)
+```
+
+```{r}
+#| label: fig-sbp-gender
+#| fig-cap: "Systolic blood pressure by gender in the NHANES package data"
+#| fig-alt: "Box plots with jittered points of first-reading systolic blood pressure for female and male NHANES participants. Both groups center near 115 to 120 mmHg with long upper tails past 200 mmHg; the male median is slightly higher."
+#| message: false
+# 4. Visualize the data
+library(ggplot2)
+
+ggplot(NHANES, aes(x = Gender, y = BPSys1, fill = Gender)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.2) +
+  labs(title = "Systolic Blood Pressure by Gender",
+       y = "Systolic Blood Pressure (mmHg)",
+       x = "Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| label: workflow-stats
+#| message: false
+# 5. Conduct statistical test
+# Remove rows with missing blood pressure data
+nhanes_clean <- NHANES |>
+  filter(!is.na(BPSys1))
+
+# Compare systolic blood pressure between genders
+t_test <- t.test(BPSys1 ~ Gender, data = nhanes_clean)
+print(t_test)
+```
+
+## Additional Resources
+
+### Learning R
+
+**Free Online Resources:**
+
+- [R for Data Science, 2nd edition](https://r4ds.hadley.nz/) - Comprehensive introduction
+- [Hands-on Programming with R](https://rstudio-education.github.io/hopr/) - Great for beginners
+- [Posit Cheatsheets](https://posit.co/resources/cheatsheets/) - Quick reference
+- [Positron documentation](https://positron.posit.co/) - Getting started with Positron
+
+**Interactive Learning:**
+
+- **swirl package:** Learn R interactively in the console
+
+```{r}
+#| label: swirl
+#| eval: false
+install.packages("swirl")
+library(swirl)
+swirl()
+```
+
+### Useful Packages for Epidemiology
+
+- **dplyr** - Data manipulation
+- **ggplot2** - Data visualization
+- **tidyr** - Data reshaping
+- **epiDisplay** - Epidemiological tables
+- **epitools** - Epidemiological calculations
+- **survival** - Survival analysis
+
+## Key Concepts Summary
+
+::: {.callout-tip}
+
+### Essential Points to Remember
+
+1. **R Objects:** Use `<-` to assign values to named objects
+
+2. **Vectors:** Combine multiple values with `c()`
+
+3. **Functions:** Call functions with syntax `function_name(argument1, argument2)`
+
+4. **Data Frames:** The primary structure for statistical analysis in R
+
+5. **Scripts:** Always write and save your code in scripts for reproducibility
+
+6. **Help:** Use `?function_name` or `help(function_name)` for documentation
+
+7. **Comments:** Use `#` to explain your code for future reference
+
+8. **Project folders:** Keep each analysis in its own folder and open that folder (Positron) or project (RStudio); `getwd()` shows where R looks for files, and you should not need `setwd()`
+
+:::
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

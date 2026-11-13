@@ -1,0 +1,1090 @@
+---
+title: "Statistical Modeling in Epidemiology"
+subtitle: "Choose a model that fits the outcome, then read what it says about risk."
+description: "Linear and logistic models for a binary outcome, odds ratios, adjustment for confounders, interaction, and model comparison, using diabetes in BRFSS 2023."
+order: 4
+unit: "Foundations"
+categories: [Foundations]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- match the type of outcome (continuous, binary, count, time to event) to a regression model;
+- explain why logistic regression, not linear regression, is used for a binary outcome;
+- interpret odds ratios from simple and adjusted logistic models;
+- describe how adjustment addresses confounding and how dummy variables code a categorical predictor;
+- test an interaction (effect modification) between two predictors;
+- check multicollinearity and influence, and compare nested models with AIC, BIC, and likelihood ratio tests.
+:::
+
+## Introduction
+
+Statistical modeling is a fundamental tool in epidemiology that allows us to:
+
+- **Describe** relationships between variables
+- **Predict** outcomes based on risk factors
+- **Estimate associations** while controlling for confounding
+
+This lecture introduces key concepts in regression modeling using real-world data from the Behavioral Risk Factor Surveillance System (BRFSS) 2023.
+
+## Setup and Data Preparation
+
+```{r}
+#| label: load-packages
+#| message: false
+#| warning: false
+# Load required packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(plotly)
+library(broom)
+library(car)
+library(ggeffects)
+library(ggstats)
+```
+
+### Loading BRFSS 2023 Data
+
+The BRFSS is a large-scale telephone survey that collects data on health-related risk behaviors, chronic health conditions, and use of preventive services from U.S. residents.
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2023, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2023 survey once and keeps it on your computer. We recode the variables on the full file, keep people with complete data, and draw a random sample of 2,000 adults.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+::: {.column-margin}
+BRFSS 2023 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2023.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+Two coding details matter. First, BRFSS uses 7 for "don't know" and 9 for "refused" or "missing", so those codes become `NA` instead of being counted as "no". Second, the question about current smoking (`SMOKDAY2`) is asked only of people who have smoked at least 100 cigarettes (`SMOKE100`); people who never reached 100 cigarettes are coded as not current smokers rather than dropped.
+
+```{r}
+#| label: load-data
+# Read the BRFSS 2023 variables this lecture uses (CDC names)
+brfss_raw <- read_brfss(
+  2023,
+  vars = c("DIABETE4", "_AGE_G", "_SEX", "_RACE", "_EDUCAG", "_INCOMG1",
+           "_BMI5CAT", "EXERANY2", "SMOKE100", "SMOKDAY2", "GENHLTH",
+           "_RFHYPE6", "_RFCHOL3")
+) |>
+  janitor::clean_names()
+
+# Recode on the full file. Codes 7 ("don't know") and 9 ("refused" or
+# "missing") become NA so they are never counted as "no".
+brfss_recoded <- brfss_raw |>
+  mutate(
+    # Outcome: diagnosed diabetes (gestational-only and prediabetes count as no)
+    diabetes = case_when(
+      diabete4 == 1 ~ 1,
+      diabete4 %in% c(2, 3, 4) ~ 0
+    ),
+    age_group = factor(case_when(
+      age_g == 1 ~ "18-24",
+      age_g == 2 ~ "25-34",
+      age_g == 3 ~ "35-44",
+      age_g == 4 ~ "45-54",
+      age_g == 5 ~ "55-64",
+      age_g == 6 ~ "65+"
+    ), levels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+")),
+    # Age as a number: the midpoint of each age group
+    age_cont = case_when(
+      age_g == 1 ~ 21,
+      age_g == 2 ~ 29.5,
+      age_g == 3 ~ 39.5,
+      age_g == 4 ~ 49.5,
+      age_g == 5 ~ 59.5,
+      age_g == 6 ~ 70
+    ),
+    sex = factor(ifelse(sex == 1, "Male", "Female")),
+    race = factor(case_when(
+      race == 1 ~ "White",
+      race == 2 ~ "Black",
+      race == 3 ~ "Native American",
+      race == 4 ~ "Asian",
+      race == 5 ~ "Native Hawaiian/PI",
+      race == 6 ~ "Other",
+      race == 7 ~ "Multiracial",
+      race == 8 ~ "Hispanic"
+    ), levels = c("White", "Black", "Hispanic", "Asian", "Native American",
+                  "Native Hawaiian/PI", "Other", "Multiracial")),
+    education = factor(case_when(
+      educag == 1 ~ "< High school",
+      educag == 2 ~ "High school graduate",
+      educag == 3 ~ "Some college",
+      educag == 4 ~ "College graduate"
+    ), levels = c("< High school", "High school graduate", "Some college", "College graduate")),
+    # Income: the seven 2023 categories (9 = don't know or missing)
+    income = factor(case_when(
+      incomg1 == 1 ~ "< $15,000",
+      incomg1 == 2 ~ "$15,000-$24,999",
+      incomg1 == 3 ~ "$25,000-$34,999",
+      incomg1 == 4 ~ "$35,000-$49,999",
+      incomg1 == 5 ~ "$50,000-$99,999",
+      incomg1 == 6 ~ "$100,000-$199,999",
+      incomg1 == 7 ~ "$200,000+"
+    ), levels = c("< $15,000", "$15,000-$24,999", "$25,000-$34,999",
+                  "$35,000-$49,999", "$50,000-$99,999", "$100,000-$199,999",
+                  "$200,000+")),
+    bmi_cat = factor(case_when(
+      bmi5cat == 1 ~ "Underweight",
+      bmi5cat == 2 ~ "Normal",
+      bmi5cat == 3 ~ "Overweight",
+      bmi5cat == 4 ~ "Obese"
+    ), levels = c("Normal", "Underweight", "Overweight", "Obese")),  # Normal weight is the reference
+    # Any physical activity in the past 30 days
+    phys_active = case_when(exerany2 == 1 ~ 1, exerany2 == 2 ~ 0),
+    # Current smoking: SMOKDAY2 is asked only of people who have smoked at
+    # least 100 cigarettes (SMOKE100 = 1), so never-smokers count as 0
+    current_smoker = case_when(
+      smoke100 == 2 ~ 0,
+      smokday2 %in% c(1, 2) ~ 1,
+      smokday2 == 3 ~ 0
+    ),
+    gen_health = factor(case_when(
+      genhlth %in% c(1, 2) ~ "Excellent/Very good",
+      genhlth == 3 ~ "Good",
+      genhlth %in% c(4, 5) ~ "Fair/Poor"
+    ), levels = c("Excellent/Very good", "Good", "Fair/Poor")),
+    hypertension = case_when(rfhype6 == 2 ~ 1, rfhype6 == 1 ~ 0),
+    high_chol = case_when(rfchol3 == 2 ~ 1, rfchol3 == 1 ~ 0)
+  )
+
+# Keep complete cases on the analysis variables, then draw 2,000 people
+set.seed(553)
+brfss_clean <- brfss_recoded |>
+  select(diabetes, age_group, age_cont, sex, race, education, income,
+         bmi_cat, phys_active, current_smoker, gen_health,
+         hypertension, high_chol) |>
+  drop_na() |>
+  slice_sample(n = 2000)
+
+cat("BRFSS 2023 respondents:", format(nrow(brfss_raw), big.mark = ","), "\n")
+cat("Complete cases on the analysis variables:",
+    format(nrow(drop_na(select(brfss_recoded, diabetes, age_group, age_cont,
+      sex, race, education, income, bmi_cat, phys_active, current_smoker,
+      gen_health, hypertension, high_chol))), big.mark = ","), "\n")
+cat("Analytic sample:", nrow(brfss_clean), "adults\n")
+```
+
+Requiring complete data on all 13 variables also drops people for variables the models below never use, such as income (`r round(100 * mean(is.na(brfss_recoded$income)))`% of respondents did not report it) and cholesterol (`r round(100 * mean(is.na(brfss_recoded$high_chol)))`% missing). A complete-case filter on only the variables each model uses would keep more people.
+
+
+### Descriptive Statistics
+
+```{r}
+#| label: descriptive-stats
+# Summary table by diabetes status
+desc_table <- brfss_clean |>
+  group_by(diabetes) |>
+  summarise(
+    N = n(),
+    `Mean Age` = round(mean(age_cont), 1),
+    `% Male` = round(100 * mean(sex == "Male"), 1),
+    `% Obese` = round(100 * mean(bmi_cat == "Obese", na.rm = TRUE), 1),
+    `% Physically Active` = round(100 * mean(phys_active), 1),
+    `% Current Smoker` = round(100 * mean(current_smoker), 1),
+    `% Hypertension` = round(100 * mean(hypertension), 1),
+    `% High Cholesterol` = round(100 * mean(high_chol), 1)
+  ) |>
+  mutate(diabetes = ifelse(diabetes == 1, "Diabetes", "No Diabetes"))
+
+desc_table |>
+  kable(caption = "Descriptive Statistics by Diabetes Status",
+        align = "lrrrrrrrr") |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+## Part 1: Statistical Modeling Concepts
+
+### 1. What is Statistical Modeling?
+
+A **statistical model** is a mathematical representation of the relationship between:
+
+- An **outcome variable** (dependent variable, response)
+- One or more **predictor variables** (independent variables, exposures, covariates)
+
+#### General Form of a Statistical Model
+
+$$f(Y) = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \cdots + \beta_p X_p + \epsilon$$
+
+Where:
+
+- $f(Y)$ is a function of the outcome (identity, log, logit, etc.)
+- $\beta_0$ is the **intercept** (baseline value)
+- $\beta_1, \beta_2, \ldots, \beta_p$ are **coefficients** (effect sizes)
+- $X_1, X_2, \ldots, X_p$ are **predictor variables**
+- $\epsilon$ is the **error term** (random variation)
+
+### 2. Types of Regression Models
+
+The choice of regression model depends on the **type of outcome variable**:
+
+```{r}
+#| label: model-types-table
+#| echo: false
+model_types <- data.frame(
+  `Outcome Type` = c("Continuous", "Binary", "Count", "Time-to-event"),
+  `Regression Type` = c("Linear", "Logistic", "Poisson/Negative Binomial", "Cox Proportional Hazards"),
+  `Link Function` = c("Identity: Y", "Logit: log(p/(1-p))", "Log: log(Y)", "Log: log(h(t))"),
+  `Example` = c("Blood pressure, BMI", "Disease status, mortality", "Number of infections", "Survival time"),
+  check.names = FALSE
+)
+
+model_types |>
+  kable(caption = "Common Regression Models in Epidemiology",
+        align = "llll") |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = TRUE) |>
+  row_spec(0, bold = TRUE, background = "#f0f0f0", color = "#1f2d3a")
+```
+
+#### Simple vs. Multiple Regression
+
+- **Simple regression**: One predictor variable
+- **Multiple regression**: Two or more predictor variables (controls for confounding)
+
+### 3. Linear Regression Example
+
+Let's model the relationship between **age** and **diabetes prevalence**.
+
+#### Simple Linear Regression
+
+```{r}
+#| label: simple-linear
+# Simple linear regression: diabetes ~ age
+model_linear_simple <- lm(diabetes ~ age_cont, data = brfss_clean)
+
+# Display results
+tidy(model_linear_simple, conf.int = TRUE) |>
+  kable(caption = "Simple Linear Regression: Diabetes ~ Age",
+        digits = 4,
+        col.names = c("Term", "Estimate", "Std. Error", "t-statistic", "p-value", "95% CI Lower", "95% CI Upper")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+```
+
+**Interpretation:**
+
+- **Intercept ($\beta_0$)**: `r round(coef(model_linear_simple)[1], 4)` - Expected probability of diabetes at age 0 (not meaningful in this context)
+- **Slope ($\beta_1$)**: `r round(coef(model_linear_simple)[2], 4)` - For each 1-year increase in age, the probability of diabetes `r ifelse(coef(model_linear_simple)[2] > 0, "increases", "decreases")` by `r round(abs(coef(model_linear_simple)[2]) * 100, 2)` percentage points (a linear model for a 0/1 outcome is called a **linear probability model**)
+
+#### Visualization
+
+##### With continuous age
+
+```{r}
+#| label: plot-linear-simple
+# Create scatter plot with regression line
+p1 <- ggplot(brfss_clean, aes(x = age_cont, y = diabetes)) +
+  geom_jitter(alpha = 0.2, width = 0.5, height = 0.02, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linewidth = 1.2) +
+  labs(
+    title = "Relationship Between Age and Diabetes",
+    subtitle = "Simple Linear Regression",
+    x = "Age (years)",
+    y = "Probability of Diabetes"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggplotly(p1) |>
+  layout(hovermode = "closest")
+```
+
+[Figure description: interactive scatter of diabetes (0 or 1, jittered) against age for `r nrow(brfss_clean)` adults, with points in two horizontal bands at 0 and 1 and in six vertical columns at the age-group midpoints. A red linear fit rises from about `r round(100 * predict(model_linear_simple, data.frame(age_cont = 21)))`% at age 21 to about `r round(100 * predict(model_linear_simple, data.frame(age_cont = 70)))`% at age 70.]{.visually-hidden}
+
+### 4. Logistic Regression: The Preferred Model for Binary Outcomes
+
+**Problem with linear regression for binary outcomes:**
+
+- Predicted probabilities can fall outside [0, 1]
+- Assumes constant variance (violated for binary data)
+
+**Solution: Logistic Regression**
+
+Uses the **logit link function** to ensure predicted probabilities stay between 0 and 1:
+
+$$\text{logit}(p) = \log\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p$$
+
+#### Simple Logistic Regression
+
+```{r}
+#| label: simple-logistic
+# Simple logistic regression: diabetes ~ age
+model_logistic_simple <- glm(diabetes ~ age_cont,
+                              data = brfss_clean,
+                              family = binomial(link = "logit"))
+
+# Display results with odds ratios
+tidy(model_logistic_simple, exponentiate = TRUE, conf.int = TRUE) |>
+  kable(caption = "Simple Logistic Regression: Diabetes ~ Age (Odds Ratios)",
+        digits = 3,
+        col.names = c("Term", "Odds Ratio", "Std. Error", "z-statistic", "p-value", "95% CI Lower", "95% CI Upper")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+```
+
+**Interpretation:**
+
+- **Odds Ratio (OR)**: `r round(exp(coef(model_logistic_simple)[2]), 3)`
+- For each 1-year increase in age, the **odds of diabetes** `r ifelse(coef(model_logistic_simple)[2] > 0, "increase", "decrease")` by `r round(abs(exp(coef(model_logistic_simple)[2]) - 1) * 100, 1)`%
+- The association is `r ifelse(tidy(model_logistic_simple)$p.value[2] < 0.05, "statistically significant", "not statistically significant")` (`r ifelse(tidy(model_logistic_simple)$p.value[2] < 0.001, "p < 0.001", paste("p =", signif(tidy(model_logistic_simple)$p.value[2], 2)))`)
+
+#### Predicted Probabilities
+
+```{r}
+#| label: fig-pp-age
+#| fig-cap: "Predicted probability of diabetes by age (ggeffects)"
+#| fig-alt: !expr sprintf("Line with a shaded 95%% confidence band showing the predicted probability of diabetes from the simple logistic model, rising from about %d%% at age 21 to about %d%% at age 70, with the band widening steadily from age 21 to age 70.", round(100 * predict(model_logistic_simple, data.frame(age_cont = 21), type = "response")), round(100 * predict(model_logistic_simple, data.frame(age_cont = 70), type = "response")))
+# From ggeffects package
+pp <- predict_response(model_logistic_simple, terms = "age_cont")
+plot(pp)
+```
+
+The same curve can be built by hand with `predict()`. The 95% confidence band is computed on the log-odds scale and then transformed, so it always stays between 0 and 1.
+
+```{r}
+#| label: pred-by-hand
+# Predicted probabilities with a 95% confidence band
+pred_data <- data.frame(age_cont = seq(18, 80, by = 1))
+pred_link <- predict(model_logistic_simple, newdata = pred_data,
+                     type = "link", se.fit = TRUE)
+pred_data <- pred_data |>
+  mutate(
+    predicted_prob = plogis(pred_link$fit),
+    lower = plogis(pred_link$fit - 1.96 * pred_link$se.fit),
+    upper = plogis(pred_link$fit + 1.96 * pred_link$se.fit)
+  )
+
+# Plot
+p2 <- ggplot(pred_data, aes(x = age_cont, y = predicted_prob)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper),
+              alpha = 0.2, fill = "darkred") +
+  geom_line(color = "darkred", linewidth = 1.5) +
+  labs(
+    title = "Predicted Probability of Diabetes by Age",
+    subtitle = "Simple logistic regression with 95% confidence band",
+    x = "Age (years)",
+    y = "Predicted Probability of Diabetes"
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_minimal(base_size = 12)
+
+ggplotly(p2)
+```
+
+[Figure description: interactive version of the same curve, built with predict(). The predicted probability of diabetes rises from `r round(100 * pred_data$predicted_prob[pred_data$age_cont == 18])`% at age 18 to `r round(100 * pred_data$predicted_prob[pred_data$age_cont == 80])`% at age 80, with a shaded 95% confidence band around the line.]{.visually-hidden}
+
+### 5. Multiple Regression: Controlling for Confounding
+
+#### What is Confounding?
+
+A **confounder** is a variable that:
+
+1. Is associated with both the exposure and the outcome
+2. Is not on the causal pathway between exposure and outcome
+3. Distorts the true relationship between exposure and outcome
+
+**Example:** The relationship between age and diabetes may be confounded by BMI, physical activity, and other factors.
+
+#### Multiple Logistic Regression
+
+```{r}
+#| label: multiple-logistic
+# Multiple logistic regression with potential confounders
+model_logistic_multiple <- glm(diabetes ~ age_cont + sex + bmi_cat +
+                                phys_active + current_smoker + education,
+                               data = brfss_clean,
+                               family = binomial(link = "logit"))
+
+# Display results
+tidy(model_logistic_multiple, exponentiate = TRUE, conf.int = TRUE) |>
+  kable(caption = "Multiple Logistic Regression: Diabetes ~ Age + Covariates (Odds Ratios)",
+        digits = 3,
+        col.names = c("Term", "Odds Ratio", "Std. Error", "z-statistic", "p-value", "95% CI Lower", "95% CI Upper")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+```
+
+```{r}
+#| label: multi-values
+#| echo: false
+or_obese <- exp(coef(model_logistic_multiple)["bmi_catObese"])
+or_age_adj <- exp(coef(model_logistic_multiple)["age_cont"])
+or_male <- exp(coef(model_logistic_multiple)["sexMale"])
+p_multi <- summary(model_logistic_multiple)$coefficients[, "Pr(>|z|)"]
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+```
+
+**Interpretation:**
+
+- **Age (adjusted OR)**: `r round(or_age_adj, 3)`
+  - After adjusting for sex, BMI, physical activity, smoking, and education, each 1-year increase in age is associated with a `r round(abs(or_age_adj - 1) * 100, 1)`% `r ifelse(or_age_adj > 1, "increase", "decrease")` in the odds of diabetes (`r fmt_p(p_multi["age_cont"])`)
+
+- **Sex (Male vs Female)**: OR = `r round(or_male, 3)`
+  - Males have `r round(abs(or_male - 1) * 100, 1)`% `r ifelse(or_male > 1, "higher", "lower")` odds of diabetes than females, adjusting for the other variables (`r fmt_p(p_multi["sexMale"])`)
+
+- **BMI (Obese vs Normal)**: OR = `r round(or_obese, 3)`
+  - Obese individuals had `r round(or_obese, 2)` times the odds of diabetes of normal-weight individuals (`r fmt_p(p_multi["bmi_catObese"])`).
+
+### 6. Dummy Variables: Coding Categorical Predictors
+
+Categorical variables with $k$ levels are represented using $k-1$ **dummy variables** (indicator variables).
+
+#### Example: Education Level
+
+Education has 4 levels:
+
+1. < High school (reference category)
+2. High school graduate
+3. Some college
+4. College graduate
+
+R automatically creates 3 dummy variables:
+
+```{r}
+#| label: dummy-variables
+# Extract dummy variable coding
+dummy_table <- data.frame(
+  Education = c("< High school", "High school graduate", "Some college", "College graduate"),
+  `Dummy 1 (HS grad)` = c(0, 1, 0, 0),
+  `Dummy 2 (Some college)` = c(0, 0, 1, 0),
+  `Dummy 3 (College grad)` = c(0, 0, 0, 1),
+  check.names = FALSE
+)
+
+dummy_table |>
+  kable(caption = "Dummy Variable Coding for Education",
+        align = "lccc") |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) |>
+  row_spec(1, bold = TRUE, background = "#ffe6e6", color = "#1f2d3a")  # Highlight reference category
+```
+
+**Reference Category:** The category with all zeros (< High school) is the **reference group**. All other categories are compared to this reference.
+
+#### Visualizing Education Effects
+
+```{r}
+#| label: plot-education-effects
+# Extract education coefficients
+educ_coefs <- tidy(model_logistic_multiple, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(str_detect(term, "education")) |>
+  mutate(
+    education_level = str_remove(term, "education"),
+    education_level = factor(education_level,
+                             levels = c("High school graduate",
+                                       "Some college",
+                                       "College graduate"))
+  )
+
+# Add reference category
+ref_row <- data.frame(
+  term = "education< High school",
+  estimate = 1.0,
+  std.error = 0,
+  statistic = NA,
+  p.value = NA,
+  conf.low = 1.0,
+  conf.high = 1.0,
+  education_level = factor("< High school (Ref)",
+                          levels = c("< High school (Ref)",
+                                    "High school graduate",
+                                    "Some college",
+                                    "College graduate"))
+)
+
+educ_coefs_full <- bind_rows(ref_row, educ_coefs) |>
+  mutate(education_level = factor(education_level,
+                                 levels = c("< High school (Ref)",
+                                           "High school graduate",
+                                           "Some college",
+                                           "College graduate")))
+
+# Plot
+p3 <- ggplot(educ_coefs_full, aes(x = education_level, y = estimate)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high),
+                  size = 0.8, color = "darkblue") +
+  coord_flip() +
+  labs(
+    title = "Association Between Education and Diabetes",
+    subtitle = "Adjusted Odds Ratios (reference: < High school)",
+    x = "Education Level",
+    y = "Odds Ratio (95% CI)"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggplotly(p3)
+```
+
+[Figure description: interactive dot-and-interval plot of adjusted odds ratios for diabetes by education, with less than high school as the reference (odds ratio 1, dashed line). High school graduate `r sprintf("%.2f", educ_coefs$estimate[1])` (95% CI `r sprintf("%.2f", educ_coefs$conf.low[1])` to `r sprintf("%.2f", educ_coefs$conf.high[1])`), some college `r sprintf("%.2f", educ_coefs$estimate[2])` (`r sprintf("%.2f", educ_coefs$conf.low[2])` to `r sprintf("%.2f", educ_coefs$conf.high[2])`), college graduate `r sprintf("%.2f", educ_coefs$estimate[3])` (`r sprintf("%.2f", educ_coefs$conf.low[3])` to `r sprintf("%.2f", educ_coefs$conf.high[3])`).]{.visually-hidden}
+
+```{r}
+#| label: fig-ggcoef
+#| fig-cap: "Education odds ratios drawn with ggcoef_model()"
+#| fig-height: 3.5
+#| fig-alt: !expr sprintf("Forest plot from ggcoef_model of the adjusted odds ratios for education, on a log scale with a vertical line at 1. Less than high school is the reference. High school graduate %.2f, some college %.2f, and college graduate %.2f, each with a 95%% confidence interval.", educ_coefs$estimate[1], educ_coefs$estimate[2], educ_coefs$estimate[3])
+# Plot model coefficients with `ggcoef_model()`
+ggcoef_model(model_logistic_multiple, exponentiate = TRUE,
+  include = c("education"),
+  variable_labels = c(
+    education = "Education"),
+  facet_labeller = ggplot2::label_wrap_gen(10)
+)
+```
+
+### 7. Interactions (Effect Modification)
+
+An **interaction** exists when the effect of one variable on the outcome differs across levels of another variable.
+
+**Epidemiologic term:** Effect modification
+
+#### Example: Age × Sex Interaction
+
+Does the effect of age on diabetes differ between males and females?
+
+```{r}
+#| label: interaction-model
+# Model with interaction term
+model_interaction <- glm(diabetes ~ age_cont * sex + bmi_cat + phys_active,
+                         data = brfss_clean,
+                         family = binomial(link = "logit"))
+
+# Display interaction results
+tidy(model_interaction, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(str_detect(term, "age_cont")) |>
+  kable(caption = "Age × Sex Interaction Model (Odds Ratios)",
+        digits = 3,
+        col.names = c("Term", "Odds Ratio", "Std. Error", "z-statistic", "p-value", "95% CI Lower", "95% CI Upper")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+```
+
+**Interpretation:**
+
+- **Main effect of age**: OR among females (reference)
+- **Interaction term (age:sexMale)**: Additional effect of age among males
+- If the interaction term is significant, the age-diabetes relationship differs by sex
+
+**In these data:** the interaction odds ratio is `r round(exp(coef(model_interaction)["age_cont:sexMale"]), 3)` (`r fmt_p(summary(model_interaction)$coefficients["age_cont:sexMale", "Pr(>|z|)"])`), so `r ifelse(summary(model_interaction)$coefficients["age_cont:sexMale", "Pr(>|z|)"] < 0.05, "the age-diabetes association differs significantly between males and females", "there is no statistically significant evidence that the age-diabetes association differs between males and females")`.
+
+#### Visualizing Interaction
+
+```{r}
+#| label: plot-interaction
+# Generate predicted probabilities by sex
+pred_interact <- ggpredict(model_interaction, terms = c("age_cont [18:80]", "sex"))
+
+# Plot
+p4 <- ggplot(pred_interact, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
+  labs(
+    title = "Predicted Probability of Diabetes by Age and Sex",
+    subtitle = "Testing for Age × Sex Interaction",
+    x = "Age (years)",
+    y = "Predicted Probability of Diabetes",
+    color = "Sex",
+    fill = "Sex"
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_color_manual(values = c("Female" = "#E64B35", "Male" = "#4DBBD5")) +
+  scale_fill_manual(values = c("Female" = "#E64B35", "Male" = "#4DBBD5")) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+
+ggplotly(p4)
+```
+
+[Figure description: interactive line chart of predicted probability of diabetes by age, one line per sex with shaded 95% confidence bands. Females rise from `r round(100 * pred_interact$predicted[pred_interact$x == 18 & pred_interact$group == "Female"])`% at age 18 to `r round(100 * pred_interact$predicted[pred_interact$x == 80 & pred_interact$group == "Female"])`% at age 80; males from `r round(100 * pred_interact$predicted[pred_interact$x == 18 & pred_interact$group == "Male"])`% to `r round(100 * pred_interact$predicted[pred_interact$x == 80 & pred_interact$group == "Male"])`%. The bands overlap across most of the age range.]{.visually-hidden}
+
+### 8. Model Diagnostics
+
+Every regression model makes **assumptions about the data**. If assumptions are violated, results may be invalid.
+
+#### Key Assumptions for Logistic Regression
+
+1. **Linearity of log odds**: Continuous predictors have a linear relationship with the log odds of the outcome
+2. **Independence of observations**: Each observation is independent
+3. **No perfect multicollinearity**: Predictors are not perfectly correlated
+4. **No influential outliers**: Individual observations don't overly influence the model
+
+#### Checking for Multicollinearity
+
+**Variance Inflation Factor (VIF)**: Measures how much the variance of a coefficient is inflated due to correlation with other predictors.
+
+- **VIF < 5**: Generally acceptable
+- **VIF > 10**: Serious multicollinearity problem
+
+```{r}
+#| label: vif-check
+# Calculate VIF
+vif_values <- vif(model_logistic_multiple)
+
+# Create VIF table
+# For models with categorical variables, vif() returns GVIF (Generalized VIF)
+if (is.matrix(vif_values)) {
+  # If matrix (categorical variables present), extract GVIF^(1/(2*Df))
+  vif_df <- data.frame(
+    Variable = rownames(vif_values),
+    VIF = vif_values[, "GVIF^(1/(2*Df))"],
+    row.names = NULL
+  )
+} else {
+  # If vector (only continuous variables)
+  vif_df <- data.frame(
+    Variable = names(vif_values),
+    VIF = as.numeric(vif_values)
+  )
+}
+
+# Add interpretation
+vif_df <- vif_df |>
+  arrange(desc(VIF)) |>
+  mutate(
+    Interpretation = case_when(
+      VIF < 5 ~ "Low (No concern)",
+      VIF >= 5 & VIF < 10 ~ "Moderate (Monitor)",
+      VIF >= 10 ~ "High (Problem)"
+    )
+  )
+
+vif_df |>
+  kable(caption = "Variance Inflation Factors (VIF) for Multiple Regression Model",
+        digits = 2,
+        align = "lrc") |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) |>
+  row_spec(which(vif_df$VIF >= 10), bold = TRUE, color = "white", background = "#B0213C") |>
+  row_spec(which(vif_df$VIF >= 5 & vif_df$VIF < 10), background = "#FFD8A8", color = "#1f2d3a") |>
+  row_spec(which(vif_df$VIF < 5), background = "#D4EDDA", color = "#1f2d3a")
+```
+
+#### Influential Observations
+
+**Cook's Distance**: Measures how much the model would change if an observation were removed.
+
+- **Cook's D > 1**: Potentially influential observation
+
+```{r}
+#| label: cooks-distance
+# Calculate Cook's distance
+cooks_d <- cooks.distance(model_logistic_multiple)
+
+# Create data frame
+influence_df <- data.frame(
+  observation = 1:length(cooks_d),
+  cooks_d = cooks_d
+) |>
+  mutate(influential = ifelse(cooks_d > 1, "Yes", "No"))
+
+# Plot
+p5 <- ggplot(influence_df, aes(x = observation, y = cooks_d, color = influential)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  labs(
+    title = "Cook's Distance: Identifying Influential Observations",
+    subtitle = "Values > 1 indicate potentially influential observations",
+    x = "Observation Number",
+    y = "Cook's Distance",
+    color = "Influential?"
+  ) +
+  scale_color_manual(values = c("No" = "steelblue", "Yes" = "red")) +
+  theme_minimal(base_size = 12)
+
+ggplotly(p5)
+
+# Count influential observations
+n_influential <- sum(influence_df$influential == "Yes")
+cat("Number of potentially influential observations:", n_influential, "\n")
+```
+
+[Figure description: interactive scatter of Cook's distance for each of the `r nrow(influence_df)` observations, with a dashed red line at 1. The largest value is `r signif(max(influence_df$cooks_d), 2)`, far below the line, so `r n_influential` observations are flagged as influential.]{.visually-hidden}
+
+### 9. Model Comparison and Selection
+
+#### Comparing Nested Models
+
+Use **Likelihood Ratio Test** to compare nested models:
+
+```{r}
+#| label: model-comparison
+# Model 1: Age only
+model1 <- glm(diabetes ~ age_cont,
+              data = brfss_clean,
+              family = binomial)
+
+# Model 2: Age + Sex
+model2 <- glm(diabetes ~ age_cont + sex,
+              data = brfss_clean,
+              family = binomial)
+
+# Model 3: Full model
+model3 <- model_logistic_multiple
+
+# Likelihood ratio test
+lrt_1_2 <- anova(model1, model2, test = "LRT")
+lrt_2_3 <- anova(model2, model3, test = "LRT")
+
+# Create comparison table
+model_comp <- data.frame(
+  Model = c("Model 1: Age only",
+            "Model 2: Age + Sex",
+            "Model 3: Full model"),
+  AIC = c(AIC(model1), AIC(model2), AIC(model3)),
+  BIC = c(BIC(model1), BIC(model2), BIC(model3)),
+  `Deviance` = c(deviance(model1), deviance(model2), deviance(model3)),
+  check.names = FALSE
+)
+
+model_comp |>
+  kable(caption = "Model Comparison: AIC, BIC, and Deviance",
+        digits = 2,
+        align = "lrrr") |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) |>
+  row_spec(which.min(model_comp$AIC), bold = TRUE, background = "#d4edda", color = "#1f2d3a")
+```
+
+**Interpretation:**
+
+- **Lower AIC/BIC** indicates better model fit
+- `r if (which.min(model_comp$AIC) == which.min(model_comp$BIC)) paste0(model_comp$Model[which.min(model_comp$AIC)], " has both the lowest AIC (", round(min(model_comp$AIC), 1), ") and the lowest BIC (", round(min(model_comp$BIC), 1), ")") else paste0(model_comp$Model[which.min(model_comp$AIC)], " has the lowest AIC (", round(min(model_comp$AIC), 1), "), but ", model_comp$Model[which.min(model_comp$BIC)], " has the lowest BIC (", round(min(model_comp$BIC), 1), "); BIC penalizes extra terms more")`
+- The likelihood ratio test of Model 3 against Model 2 gives `r fmt_p(lrt_2_3$"Pr(>Chi)"[2])`: `r ifelse(lrt_2_3$"Pr(>Chi)"[2] < 0.05, "the added covariates significantly improve the fit", "the added covariates do not significantly improve the fit")`
+
+### 10. Error Term in Statistical Models
+
+All statistical models include an **error term** ($\epsilon$) to account for:
+
+- **Random variation** in the outcome
+- **Unmeasured variables** not included in the model
+- **Measurement error** in variables
+
+$$Y = \beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p + \epsilon$$
+
+**Key points:**
+
+- The model cannot perfectly predict every outcome
+- The difference between **observed** and **predicted** values is the error (residual)
+- We assume errors are normally distributed with mean 0 (for linear regression)
+
+## Part 2: Student Lab Activity
+
+### Lab Overview
+
+In this lab, you will:
+
+1. Build your own logistic regression model predicting **hypertension** (high blood pressure)
+2. Create dummy variables for categorical predictors
+3. Interpret regression coefficients
+4. Test for confounding and interaction
+5. Perform model diagnostics
+
+### Lab Setup
+
+Put this code at the top of your lab `.qmd`. It builds the same 2,000-person sample as the lecture (install the packages once with `install.packages(c("brfssdata", "janitor"))`).
+
+```{r}
+#| label: lab-setup
+#| eval: false
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(car)
+library(ggeffects)
+library(knitr)
+library(kableExtra)
+
+# Read the BRFSS 2023 variables this lecture uses (CDC names)
+brfss_raw <- read_brfss(
+  2023,
+  vars = c("DIABETE4", "_AGE_G", "_SEX", "_RACE", "_EDUCAG", "_INCOMG1",
+           "_BMI5CAT", "EXERANY2", "SMOKE100", "SMOKDAY2", "GENHLTH",
+           "_RFHYPE6", "_RFCHOL3")
+) |>
+  janitor::clean_names()
+
+# Recode on the full file. Codes 7 ("don't know") and 9 ("refused" or
+# "missing") become NA so they are never counted as "no".
+brfss_recoded <- brfss_raw |>
+  mutate(
+    # Outcome: diagnosed diabetes (gestational-only and prediabetes count as no)
+    diabetes = case_when(
+      diabete4 == 1 ~ 1,
+      diabete4 %in% c(2, 3, 4) ~ 0
+    ),
+    age_group = factor(case_when(
+      age_g == 1 ~ "18-24",
+      age_g == 2 ~ "25-34",
+      age_g == 3 ~ "35-44",
+      age_g == 4 ~ "45-54",
+      age_g == 5 ~ "55-64",
+      age_g == 6 ~ "65+"
+    ), levels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+")),
+    # Age as a number: the midpoint of each age group
+    age_cont = case_when(
+      age_g == 1 ~ 21,
+      age_g == 2 ~ 29.5,
+      age_g == 3 ~ 39.5,
+      age_g == 4 ~ 49.5,
+      age_g == 5 ~ 59.5,
+      age_g == 6 ~ 70
+    ),
+    sex = factor(ifelse(sex == 1, "Male", "Female")),
+    race = factor(case_when(
+      race == 1 ~ "White",
+      race == 2 ~ "Black",
+      race == 3 ~ "Native American",
+      race == 4 ~ "Asian",
+      race == 5 ~ "Native Hawaiian/PI",
+      race == 6 ~ "Other",
+      race == 7 ~ "Multiracial",
+      race == 8 ~ "Hispanic"
+    ), levels = c("White", "Black", "Hispanic", "Asian", "Native American",
+                  "Native Hawaiian/PI", "Other", "Multiracial")),
+    education = factor(case_when(
+      educag == 1 ~ "< High school",
+      educag == 2 ~ "High school graduate",
+      educag == 3 ~ "Some college",
+      educag == 4 ~ "College graduate"
+    ), levels = c("< High school", "High school graduate", "Some college", "College graduate")),
+    # Income: the seven 2023 categories (9 = don't know or missing)
+    income = factor(case_when(
+      incomg1 == 1 ~ "< $15,000",
+      incomg1 == 2 ~ "$15,000-$24,999",
+      incomg1 == 3 ~ "$25,000-$34,999",
+      incomg1 == 4 ~ "$35,000-$49,999",
+      incomg1 == 5 ~ "$50,000-$99,999",
+      incomg1 == 6 ~ "$100,000-$199,999",
+      incomg1 == 7 ~ "$200,000+"
+    ), levels = c("< $15,000", "$15,000-$24,999", "$25,000-$34,999",
+                  "$35,000-$49,999", "$50,000-$99,999", "$100,000-$199,999",
+                  "$200,000+")),
+    bmi_cat = factor(case_when(
+      bmi5cat == 1 ~ "Underweight",
+      bmi5cat == 2 ~ "Normal",
+      bmi5cat == 3 ~ "Overweight",
+      bmi5cat == 4 ~ "Obese"
+    ), levels = c("Normal", "Underweight", "Overweight", "Obese")),  # Normal weight is the reference
+    # Any physical activity in the past 30 days
+    phys_active = case_when(exerany2 == 1 ~ 1, exerany2 == 2 ~ 0),
+    # Current smoking: SMOKDAY2 is asked only of people who have smoked at
+    # least 100 cigarettes (SMOKE100 = 1), so never-smokers count as 0
+    current_smoker = case_when(
+      smoke100 == 2 ~ 0,
+      smokday2 %in% c(1, 2) ~ 1,
+      smokday2 == 3 ~ 0
+    ),
+    gen_health = factor(case_when(
+      genhlth %in% c(1, 2) ~ "Excellent/Very good",
+      genhlth == 3 ~ "Good",
+      genhlth %in% c(4, 5) ~ "Fair/Poor"
+    ), levels = c("Excellent/Very good", "Good", "Fair/Poor")),
+    hypertension = case_when(rfhype6 == 2 ~ 1, rfhype6 == 1 ~ 0),
+    high_chol = case_when(rfchol3 == 2 ~ 1, rfchol3 == 1 ~ 0)
+  )
+
+# Keep complete cases on the analysis variables, then draw 2,000 people
+set.seed(553)
+brfss_clean <- brfss_recoded |>
+  select(diabetes, age_group, age_cont, sex, race, education, income,
+         bmi_cat, phys_active, current_smoker, gen_health,
+         hypertension, high_chol) |>
+  drop_na() |>
+  slice_sample(n = 2000)
+```
+
+### Lab Instructions
+
+#### Task 1: Explore the Outcome Variable
+
+```{r}
+#| label: lab-task1
+# YOUR CODE HERE: Create a frequency table of hypertension status
+
+# YOUR CODE HERE: Calculate the prevalence of hypertension by age group
+
+```
+
+**Questions:**
+
+a) What is the overall prevalence of hypertension in the dataset?
+b) How does hypertension prevalence vary by age group?
+
+#### Task 2: Build a Simple Logistic Regression Model
+
+```{r}
+#| label: lab-task2
+# YOUR CODE HERE: Fit a simple logistic regression model
+# Outcome: hypertension
+# Predictor: age_cont
+
+# YOUR CODE HERE: Display the results with odds ratios
+
+```
+
+**Questions:**
+
+a) What is the odds ratio for age? Interpret this value.
+b) Is the association statistically significant?
+c) What is the 95% confidence interval for the odds ratio?
+
+#### Task 3: Create a Multiple Regression Model
+
+```{r}
+#| label: lab-task3
+# YOUR CODE HERE: Fit a multiple logistic regression model
+# Outcome: hypertension
+# Predictors: age_cont, sex, bmi_cat, phys_active, current_smoker
+
+# YOUR CODE HERE: Display the results
+
+```
+
+**Questions:**
+
+a) How did the odds ratio for age change after adjusting for other variables?
+b) What does this suggest about confounding?
+c) Which variables are the strongest predictors of hypertension?
+
+#### Task 4: Interpret Dummy Variables
+
+```{r}
+#| label: lab-task4
+# YOUR CODE HERE: Create a table showing the dummy variable coding for bmi_cat
+
+# YOUR CODE HERE: Extract and display the odds ratios for BMI categories
+
+```
+
+**Questions:**
+
+a) What is the reference category for BMI?
+b) Interpret the odds ratio for "Obese" compared to the reference category.
+c) How would you explain this to a non-statistician?
+
+#### Task 5: Test for Interaction
+
+```{r}
+#| label: lab-task5
+# YOUR CODE HERE: Fit a model with Age × BMI interaction
+# Test if the effect of age on hypertension differs by BMI category
+
+# YOUR CODE HERE: Perform a likelihood ratio test comparing models with and without interaction
+
+```
+
+**Questions:**
+
+a) Is the interaction term statistically significant?
+b) What does this mean in epidemiologic terms (effect modification)?
+c) Create a visualization showing predicted probabilities by age and BMI category
+
+#### Task 6: Model Diagnostics
+
+```{r}
+#| label: lab-task6
+# YOUR CODE HERE: Calculate VIF for your multiple regression model
+
+# YOUR CODE HERE: Create a Cook's distance plot to identify influential observations
+
+```
+
+**Questions:**
+
+a) Are there any concerns about multicollinearity?
+b) Are there any influential observations that might affect your results?
+c) What would you do if you found serious violations?
+
+#### Task 7: Model Comparison
+
+```{r}
+#| label: lab-task7
+# YOUR CODE HERE: Compare three models using AIC and BIC
+# Model A: Age only
+# Model B: Age + sex + bmi_cat
+# Model C: Age + sex + bmi_cat + phys_active + current_smoker
+
+# YOUR CODE HERE: Create a comparison table
+
+```
+
+**Questions:**
+
+a) Which model has the best fit based on AIC?
+b) Is the added complexity of the full model justified?
+c) Which model would you choose for your final analysis? Why?
+
+### Lab Report Guidelines
+
+Write a brief report (1-2 pages) summarizing your findings:
+
+1. **Introduction**: State your research question
+2. **Methods**: Describe your analytic approach
+3. **Results**: Present key findings with tables and figures
+4. **Interpretation**: Explain what your results mean
+5. **Limitations**: Discuss potential issues with your analysis
+
+**Submission:** Upload two files to the Brightspace assignment: your completed `.qmd` (or `.Rmd`) file and the rendered HTML report. In a `.qmd`, put this in the YAML header so the HTML opens on its own:
+
+```yaml
+format:
+  html:
+    embed-resources: true
+```
+
+## Summary
+
+### Key Concepts Covered
+
+1. **Statistical modeling** describes relationships between variables
+2. **Regression types** depend on the outcome variable type
+3. **Logistic regression** is appropriate for binary outcomes
+4. **Multiple regression** controls for confounding
+5. **Dummy variables** represent categorical predictors
+6. **Interactions** test for effect modification
+7. **Model diagnostics** check assumptions and identify problems
+8. **Model comparison** helps select the best model
+
+### Important Formulas
+
+**Logistic Regression:**
+
+$$\text{logit}(p) = \log\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p$$
+
+**Odds Ratio:**
+
+$$\text{OR} = e^{\beta_i}$$
+
+**Predicted Probability:**
+
+$$p = \frac{e^{\beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p}}{1 + e^{\beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p}}$$
+
+## References
+
+- Agresti, A. (2018). *An Introduction to Categorical Data Analysis* (3rd ed.). Wiley.
+- Hosmer, D. W., Lemeshow, S., & Sturdivant, R. X. (2013). *Applied Logistic Regression* (3rd ed.). Wiley.
+- Vittinghoff, E., Glidden, D. V., Shiboski, S. C., & McCulloch, C. E. (2012). *Regression Methods in Biostatistics* (2nd ed.). Springer.
+- Centers for Disease Control and Prevention. (2023). *Behavioral Risk Factor Surveillance System*.
+
+**Next lecture:** [Simple Linear Regression](simple-linear-regression.qmd).
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

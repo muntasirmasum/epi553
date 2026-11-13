@@ -114,7 +114,7 @@ main h5 {
   padding-left: 0.6rem;
 }
 
-.sidebar-navigation .sidebar-section > .sidebar-item-container .menu-text {
+.sidebar-navigation .sidebar-item-section > .sidebar-item-container .menu-text {
   font-size: 0.76rem;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -130,7 +130,8 @@ a:focus-visible,
 button:focus-visible,
 summary:focus-visible,
 input:focus-visible,
-.nav-link:focus-visible {
+.nav-link:focus-visible,
+.callout-header[role="button"]:focus-visible {
   outline: 3px solid $primary;
   outline-offset: 2px;
   border-radius: 3px;
@@ -182,7 +183,7 @@ mjx-container[display="true"] {
 }
 
 pre code {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 [data-mm-scroll]:focus-visible {
@@ -314,4 +315,36 @@ main table caption {
 .nav-footer {
   font-size: 0.85rem;
   border-top: 1px solid $mm-hair;
+}
+
+// Listing pages (Lectures, Labs, Resources) inherit author metadata from their
+// folder; the cards carry the content, so hide the title-block metadata there.
+.listing-page #title-block-header .quarto-title-meta {
+  display: none;
+}
+
+// Inline code inside headings: follow the heading's colors in both modes
+h1, h2, h3, h4, h5, h6 {
+  code {
+    background-color: $mm-tint;
+    color: inherit;
+  }
+}
+
+// Inline code (not code blocks) may wrap, so long names never widen the page
+main :not(pre) > code {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+// Long bare URLs wrap instead of widening the page on small screens
+main a {
+  overflow-wrap: break-word;
+}
+
+// Checkbox labels (task lists) are inline blocks: let long file names break so
+// the label never widens the page on a phone
+main li > label,
+main li > label code {
+  overflow-wrap: anywhere;
 }

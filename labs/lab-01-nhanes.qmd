@@ -1,0 +1,561 @@
+---
+title: "Lab 1: Exploring Health Survey Data with NHANES"
+subtitle: "Load a real survey dataset, summarize it, and make your first plots in R."
+description: "Select and recode NHANES variables, build summary tables, and explore blood pressure and BMI across age groups and health behaviors."
+order: 1
+unit: "Week 1"
+categories: [Labs]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(digits = 4)
+```
+
+## Welcome to Your First Lab Activity
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+**Time:** about 30 minutes. **Goal:** learn to work with real public health survey data in R.
+
+- Load and explore a large national health survey dataset
+- Use tidyverse functions to summarize and group data
+- Create a professional summary table for epidemiological questions
+- Practice the complete data exploration workflow
+- Develop skills for identifying health disparities
+:::
+
+::: {.data-card}
+[Lab files]{.eyebrow}
+
+Work in your own `.qmd` file. The template has the YAML header, the setup code, and the three tasks ready to fill in.
+
+[Download the Lab 1 template (.qmd)](templates/template-lab-01-nhanes.qmd){.btn .btn-sm .btn-outline-primary download="lab-01-nhanes.qmd"}
+:::
+
+## Context: The NHANES Dataset
+
+### National Health and Nutrition Examination Survey (NHANES)
+
+The **NHANES** survey is the gold standard for population-based health and nutritional data in the United States, conducted by the CDC's National Center for Health Statistics. It combines:
+
+- **Interviews** - Health history, demographics, behaviors
+- **Physical examinations** - Blood pressure, BMI, clinical measurements
+- **Laboratory tests** - Blood work, biomarkers
+
+**Real-world use:** NHANES data informs Healthy People objectives, food and nutrition guidelines, and health disparities research.
+
+**Today's task:** You'll explore NHANES data on cardiovascular health, physical activity, and demographic disparities, all key epidemiological outcomes.
+
+::: {.callout-warning}
+## About the NHANES R package
+
+The `NHANES` package holds 10,000 people drawn from the 2009-2010 and 2011-2012 surveys and **resampled** for teaching, so some participants appear more than once, and the survey weights are not used. It is excellent for learning R, but percentages here are not national estimates. We restrict the analysis to **adults (18 and older)**; smoking questions are asked from age 20, so smoking percentages cover ages 20 and up.
+:::
+
+## Part 1: Setting Up Your Workspace
+
+### Load Required Packages
+
+```{r}
+#| label: load-packages
+# Load required packages
+library(tidyverse)    # Data manipulation (dplyr, ggplot2, etc.)
+library(NHANES)       # NHANES dataset
+library(knitr)        # For professional table output
+library(kableExtra)   # Enhanced tables
+```
+
+::: {.callout-tip}
+## Troubleshooting
+
+If you see an error, run this once:
+
+```{r}
+#| label: install-nhanes
+#| eval: false
+install.packages("NHANES")
+```
+
+Then reload: `library(NHANES)`
+:::
+
+## Part 2: Loading and Exploring the NHANES Data
+
+### Load and Examine the NHANES Dataset
+
+```{r}
+#| label: load-nhanes-data
+# Load the NHANES data
+data(NHANES)
+
+# Examine the first few rows
+head(NHANES, n = 10)
+
+# View data structure
+str(NHANES)
+
+# Dimensions: rows (observations) and columns (variables)
+dim(NHANES)
+```
+
+### View All Available Variables
+
+```{r}
+#| label: view-all-variables
+# What variables do we have?
+names(NHANES)
+```
+
+### Check for Missing Data
+
+```{r}
+#| label: check-missing
+# Count missing values in each column
+missing_summary <- data.frame(
+  Variable = names(NHANES),
+  Missing_Count = colSums(is.na(NHANES)),
+  Missing_Percent = round(colSums(is.na(NHANES)) / nrow(NHANES) * 100, 2)
+)
+
+# Show variables with the most missing data
+print(missing_summary[order(-missing_summary$Missing_Count), ][1:15, ])
+```
+
+::: {.callout-note}
+## Epidemiological note
+
+Always use `na.rm = TRUE` in functions like `sum()` and `mean()` to exclude missing values, but **report how many were excluded**.
+:::
+
+## Part 3: Data Preparation and Exploration
+
+### Create Analysis Dataset
+
+```{r}
+#| label: select-variables
+# Select key variables for analysis (adults 18 and older)
+nhanes_analysis <- NHANES |>
+  filter(Age >= 18) |>
+  dplyr::select(
+    ID,
+    Gender,           # Sex (Male/Female)
+    Age,              # Age in years
+    Race1,            # Race/ethnicity
+    Education,        # Education level
+    BMI,              # Body Mass Index
+    Pulse,            # Resting heart rate
+    BPSys1,           # Systolic blood pressure (1st reading)
+    BPDia1,           # Diastolic blood pressure (1st reading)
+    PhysActive,       # Physically active (Yes/No)
+    Smoke100,         # Smoked at least 100 cigarettes in life
+    SmokeNow,         # Smokes now (asked only if Smoke100 is "Yes")
+    Diabetes,         # Diabetes diagnosis (Yes/No)
+    HealthGen         # General health rating
+  ) |>
+  mutate(
+    # Binary hypertension indicator (BPSys1 >= 140 OR BPDia1 >= 90)
+    Hypertension = factor(ifelse(BPSys1 >= 140 | BPDia1 >= 90, "Yes", "No")),
+    # Current smoker: SmokeNow is missing for people who never smoked 100
+    # cigarettes (they are not current smokers). Smoking questions start at
+    # age 20, so this is missing for ages 18-19.
+    Current_Smoker = case_when(
+      Smoke100 == "No" ~ "No",
+      SmokeNow == "Yes" ~ "Yes",
+      SmokeNow == "No" ~ "No"
+    )
+  )
+
+# View the processed dataset
+head(nhanes_analysis, 10)
+
+# Check dimensions
+dim(nhanes_analysis)
+```
+
+## Part 4: Summary Statistics by Groups
+
+### Summary by Gender
+
+**Research Question:** Do cardiovascular health indicators and physical activity differ by gender?
+
+```{r}
+#| label: summary-by-gender
+# Create summary statistics grouped by gender
+health_by_gender <- nhanes_analysis |>
+  group_by(Gender) |>
+  summarise(
+    N = n(),
+    # Descriptive statistics
+    Mean_Age = round(mean(Age, na.rm = TRUE), 2),
+    Mean_BMI = round(mean(BMI, na.rm = TRUE), 2),
+    Mean_SysBP = round(mean(BPSys1, na.rm = TRUE), 2),
+    Mean_DiaBP = round(mean(BPDia1, na.rm = TRUE), 2),
+    # Prevalence estimates (percentages)
+    Pct_Physically_Active = round(
+      sum(PhysActive == "Yes", na.rm = TRUE) / sum(!is.na(PhysActive)) * 100, 2),
+    Pct_Current_Smoker = round(
+      sum(Current_Smoker == "Yes", na.rm = TRUE) / sum(!is.na(Current_Smoker)) * 100, 2),
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2),
+    Pct_Diabetes = round(
+      sum(Diabetes == "Yes", na.rm = TRUE) / sum(!is.na(Diabetes)) * 100, 2)
+  )
+
+print(health_by_gender)
+```
+
+### Summary by Age Group
+
+**Research Question:** How do health outcomes and behaviors vary across the lifespan?
+
+```{r}
+#| label: summary-by-age-group
+#What not to do:
+# Summary by age
+health_by_age <- nhanes_analysis |>
+  group_by(Age) |>
+  summarise(
+    N = n(),
+    Mean_BMI = round(mean(BMI, na.rm = TRUE), 2),
+    Mean_SysBP = round(mean(BPSys1, na.rm = TRUE), 2),
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2),
+    Pct_Diabetes = round(
+      sum(Diabetes == "Yes", na.rm = TRUE) / sum(!is.na(Diabetes)) * 100, 2),
+    Pct_Physically_Active = round(
+      sum(PhysActive == "Yes", na.rm = TRUE) / sum(!is.na(PhysActive)) * 100, 2)
+  )
+
+#Do this:
+# Create age groups for analysis
+nhanes_analysis <- nhanes_analysis |>
+  mutate(
+    # cut() includes the right end of each interval: (17, 20] is 18-20
+    Age_Group = cut(Age,
+                    breaks = c(17, 20, 35, 50, 65, 100),
+                    labels = c("18-20", "21-35", "36-50", "51-65", "66+"))
+  )
+
+# Summary by age group
+health_by_age <- nhanes_analysis |>
+  group_by(Age_Group) |>
+  summarise(
+    N = n(),
+    Mean_BMI = round(mean(BMI, na.rm = TRUE), 2),
+    Mean_SysBP = round(mean(BPSys1, na.rm = TRUE), 2),
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2),
+    Pct_Diabetes = round(
+      sum(Diabetes == "Yes", na.rm = TRUE) / sum(!is.na(Diabetes)) * 100, 2),
+    Pct_Physically_Active = round(
+      sum(PhysActive == "Yes", na.rm = TRUE) / sum(!is.na(PhysActive)) * 100, 2)
+  )
+
+print(health_by_age)
+```
+
+### Stratified Analysis: Gender AND Race
+
+**Research Question:** Are there racial/ethnic differences in hypertension that differ by gender?
+
+```{r}
+#| label: stratified-analysis
+# Stratified by gender and race/ethnicity
+health_stratified <- nhanes_analysis |>
+  group_by(Gender, Race1) |>
+  summarise(
+    N = n(),
+    Mean_SysBP = round(mean(BPSys1, na.rm = TRUE), 2),
+    Mean_BMI = round(mean(BMI, na.rm = TRUE), 2),
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2),
+    .groups = 'drop'
+  )
+
+print(health_stratified)
+```
+
+## Part 5: Data Visualization
+
+### Hypertension Prevalence by Gender and Age
+
+```{r}
+#| label: fig-htn-age-sex
+#| fig-cap: "Hypertension prevalence by age group and gender, NHANES adults"
+#| fig-alt: "Grouped bar chart of hypertension prevalence by age group for females and males. Prevalence rises steeply with age: under 4% in both sexes at 18 to 20, about 2% (female) and 8% (male) at 21 to 35, 8% and 15% at 36 to 50, 21% and 25% at 51 to 65, and 44% (female) and 35% (male) at 66 and older. Males are higher in every group except 66 and older."
+# Create visualization
+health_by_age_gender <- nhanes_analysis |>
+  group_by(Age_Group, Gender) |>
+  summarise(
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2),
+    .groups = 'drop'
+  )
+
+ggplot(health_by_age_gender, aes(x = Age_Group, y = Pct_Hypertension, fill = Gender)) +
+  geom_col(position = "dodge", alpha = 0.8) +
+  labs(
+    title = "Hypertension Prevalence by Age and Gender",
+    subtitle = "NHANES Data",
+    x = "Age Group",
+    y = "Prevalence (%)",
+    fill = "Gender",
+    caption = "Source: National Health and Nutrition Examination Survey"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+### Physical Activity by Age Group
+
+```{r}
+#| label: fig-activity-age
+#| fig-cap: "Physical activity by age group, NHANES adults"
+#| fig-alt: "Bar chart of the percent physically active by age group, falling with age: 63.3% at 18 to 20, 61.8% at 21 to 35, 55.5% at 36 to 50, 47.5% at 51 to 65, and 37.2% at 66 and older."
+activity_by_age <- health_by_age |>
+  filter(!is.na(Age_Group))
+
+ggplot(activity_by_age, aes(x = Age_Group, y = Pct_Physically_Active)) +
+  geom_col(fill = "#2ecc71", alpha = 0.8) +
+  geom_text(aes(label = paste0(Pct_Physically_Active, "%")), 
+            vjust = -0.5, size = 3) +
+  labs(
+    title = "Physical Activity Participation by Age Group",
+    subtitle = "NHANES Data",
+    x = "Age Group",
+    y = "Prevalence (%)",
+    caption = "Source: National Health and Nutrition Examination Survey"
+  ) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.1))) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+### Hypertension by Race/Ethnicity
+
+```{r}
+#| label: fig-htn-race
+#| fig-cap: "Hypertension prevalence by race/ethnicity, NHANES adults"
+#| fig-alt: "Bar chart of hypertension prevalence by race and ethnicity: Black 21.1%, White 16.7%, Other 13.8%, Mexican 13.2%, and Hispanic 11.7%."
+hypertension_by_race <- nhanes_analysis |>
+  group_by(Race1) |>
+  summarise(
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2),
+    N = n(),
+    .groups = 'drop'
+  ) |>
+  filter(!is.na(Race1))
+
+ggplot(hypertension_by_race, aes(x = Race1, y = Pct_Hypertension)) +
+  geom_col(fill = "#e74c3c", alpha = 0.8) +
+  geom_text(aes(label = paste0(Pct_Hypertension, "%")), 
+            vjust = -0.5, size = 3) +
+  labs(
+    title = "Hypertension Prevalence by Race/Ethnicity",
+    subtitle = "NHANES Data",
+    x = "Race/Ethnicity",
+    y = "Prevalence (%)",
+    caption = "Source: National Health and Nutrition Examination Survey"
+  ) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.1))) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+## Part 6: Professional Summary Table
+
+```{r}
+#| label: professional-table
+# Create summary table by gender
+summary_table <- health_by_gender |>
+  select(
+    Gender,
+    N,
+    `Mean Age` = Mean_Age,
+    `Mean BMI` = Mean_BMI,
+    `Mean SysBP` = Mean_SysBP,
+    `% Hypertension` = Pct_Hypertension,
+    `% Physically Active` = Pct_Physically_Active
+  )
+
+# Display with kableExtra
+kable(summary_table, 
+      caption = "Cardiovascular Health and Physical Activity by Gender",
+      format = "html") |>
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+## Your Turn: Guided Practice
+
+### Task 1: Explore Health Disparities by Education (15 minutes)
+
+Using the `nhanes_analysis` data, explore:
+
+**"How does hypertension prevalence vary by education level?"**
+
+Write code to:
+
+1. Group by education level
+2. Calculate sample size, mean systolic BP, and percent with hypertension
+3. Print the results
+
+```{r}
+#| label: task1-template
+#| eval: false
+# Your code here:
+health_by_education <- nhanes_analysis |>
+  group_by(Education) |>
+  summarise(
+    N = n(),
+    Mean_SysBP = round(mean(BPSys1, na.rm = TRUE), 2),
+    Pct_Hypertension = round(
+      sum(Hypertension == "Yes", na.rm = TRUE) / sum(!is.na(Hypertension)) * 100, 2)
+  )
+
+print(health_by_education)
+```
+
+### Task 2: Create a Visualization (10 minutes)
+
+Create a bar chart showing hypertension by education level:
+
+```{r}
+#| label: task2-template
+#| eval: false
+# Your visualization here:
+health_by_education |>
+  filter(!is.na(Education)) |>
+  ggplot(aes(x = Education, y = Pct_Hypertension)) +
+  geom_col(fill = "steelblue", alpha = 0.7) +
+  geom_text(aes(label = paste0(Pct_Hypertension, "%")), 
+            vjust = -0.5, size = 3) +
+  labs(
+    title = "Hypertension Prevalence by Education Level",
+    x = "Education Level",
+    y = "Percent with Hypertension (%)",
+    caption = "Source: NHANES"
+  ) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.1))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Task 3: Write a Data Interpretation (5 minutes)
+
+Write 2-3 sentences:
+
+**"What does this pattern tell us about health disparities and social determinants?"**
+
+Consider:
+
+- Which education groups have highest/lowest hypertension?
+- What might explain these differences?
+- Why does this matter for public health?
+
+## Grading Rubric for Task 3
+
+| Criteria | Excellent (Full Credit) | Adequate | Needs Work |
+|---|---|---|---|
+| **Identifies pattern** | Explicitly states which groups have highest/lowest rates | Mentions direction but lacks specificity | Vague or incorrect about pattern |
+| **Explains mechanism** | References social determinants, access, or health literacy | Mentions inequality but lacks detail | No explanation provided |
+| **Public health relevance** | Discusses implications for policy or programs | Notes importance but general | Missing public health connection |
+| **Writing quality** | Clear, 2-3 well-written sentences | Adequate but could be clearer | Incomplete or unclear |
+
+## Assessment Rubric: Overall Lab Performance
+
+### Scoring Guide (100 points total)
+
+#### Task 1: Code (25 points)
+
+- Correct `group_by()` (5 pts)
+- Calculates N correctly (5 pts)
+- Calculates mean systolic BP correctly (5 pts)
+- Calculates hypertension percentage correctly (10 pts)
+
+#### Task 2: Visualization (25 points)
+
+- Filters missing values (5 pts)
+- Correct plot type and aesthetics (10 pts)
+- Proper labels and formatting (5 pts)
+- Readable axis labels (5 pts)
+
+#### Task 3: Interpretation (25 points)
+
+- Identifies specific pattern in data (8 pts)
+- Explains mechanism/social determinants (8 pts)
+- Connects to public health implications (9 pts)
+
+#### Overall Code Quality (25 points)
+
+- Comments explain code (5 pts)
+- Code runs without errors (10 pts)
+- Output is properly formatted (5 pts)
+- Submitted as HTML file (5 pts)
+
+## Exporting Your Work
+
+### Save, render, and submit
+
+1. **Save** your file as `LastName_FirstName_Lab01.qmd` (start from the template above).
+2. **Render** it: the **Preview** button in Positron, or the **Render** button in RStudio. The template's YAML header already has `embed-resources: true`, so the HTML file opens on its own.
+3. **Submit** both the `.qmd` and the rendered `.html` file to the Brightspace assignment. See [Submitting your work](../resources/submitting-your-work.qmd) for details.
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Skills practiced
+
+- Loading data from R packages
+- Data exploration with `str()`, `summary()`, `head()`
+- Grouping and summarizing with `group_by()` and `summarise()`
+- Creating derived variables with `mutate()`
+- Calculating epidemiological statistics
+- Stratification to reveal disparities
+- Professional visualization with ggplot2
+- Publication-ready tables
+:::
+
+## Troubleshooting
+
+#### "object 'NHANES' not found"
+→ Make sure you ran `data(NHANES)` after loading the package
+
+#### Missing values (NA) showing
+→ This is normal! Always use `na.rm = TRUE` in calculations
+
+#### Bar chart looks wrong
+→ Use `filter(!is.na(Variable))` to remove missing groups
+
+## Resources
+
+- [The tidyverse](https://www.tidyverse.org/)
+- [dplyr cheatsheet (PDF)](https://posit.co/wp-content/uploads/2022/10/data-transformation-1.pdf)
+- [ggplot2 cheatsheet (PDF)](https://posit.co/wp-content/uploads/2022/10/data-visualization-1.pdf)
+- [NHANES at the CDC](https://wwwn.cdc.gov/nchs/nhanes/)
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

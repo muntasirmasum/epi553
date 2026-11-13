@@ -19,8 +19,8 @@ BRFSS lectures load the survey with the [brfssdata](https://muntasirmasum.github
 
 ## Package notes
 
-- `mgcv` is pinned below 1.9-5, which has no macOS binary and does not compile without gettext headers.
-- `waffle` was archived from CRAN; add it with `uvr add cran/waffle@master` when converting the Data Visualization lecture.
+- `mgcv` uses the CRAN binary (1.9-5 and later); an older pin is no longer needed.
+- `waffle` was archived from CRAN, so `uvr.toml` installs it from the CRAN mirror on GitHub (`cran/waffle@master`); `uvr sync` handles it.
 
 ## Theme
 

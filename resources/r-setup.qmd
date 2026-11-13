@@ -1,0 +1,78 @@
+---
+title: "Setting Up R"
+subtitle: "Install R, an IDE, and the course packages, then check that everything works."
+description: "Install R and Positron (or RStudio), install the course packages, set up a project folder, and render a setup check to confirm it all works."
+order: 1
+unit: "Getting started"
+categories: [Resources]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## What you will do
+
+1. Install R and an IDE (Positron or RStudio).
+2. Install the R packages used in EPI 553.
+3. Make a project folder for the course.
+4. Render the setup check file to confirm that everything works.
+
+Allow about 30 minutes. Do this before the first lab.
+:::
+
+## 1. Install R and an IDE
+
+1. **R** (version 4.4 or later): download it from [CRAN](https://cloud.r-project.org/) for Windows, Mac, or Linux and install it with the default options.
+2. **An IDE**, either one:
+   - **Positron** (recommended): [positron.posit.co](https://positron.posit.co/). A modern IDE from Posit for R and Python. Quarto is built in.
+   - **RStudio Desktop**: [posit.co/download/rstudio-desktop](https://posit.co/download/rstudio-desktop/). The long-standing R IDE. Quarto is built in.
+
+Both work for every lecture and lab. [Introduction to R](intro-to-r.qmd) shows where things are in each.
+
+## 2. Install the course packages
+
+Open your IDE, click in the **Console**, and run this once (it takes a few minutes):
+
+```{r}
+#| label: install-packages
+#| eval: false
+install.packages(c(
+  "tidyverse", "rmarkdown", "knitr", "kableExtra", "broom", "gtsummary",
+  "car", "ggeffects", "janitor", "plotly", "NHANES", "brfssdata", "corrplot"
+))
+```
+
+Later lectures load a few more packages; each lecture lists the ones it uses at the top, and you install any you are missing the same way.
+
+::: {.callout-tip}
+## About brfssdata
+
+Several lectures use the Behavioral Risk Factor Surveillance System (BRFSS) through the [brfssdata](https://muntasirmasum.github.io/brfssdata/) package. The first time you call `read_brfss()` for a survey year, it downloads that year once (about 20 MB) and keeps it on your computer, so you need an internet connection only the first time.
+:::
+
+## 3. Make a project folder
+
+Keep all your EPI 553 work in one folder, for example `Documents/EPI553`, with four subfolders:
+
+```
+EPI553/
+  data/      raw and cleaned data files
+  scripts/   .R scripts
+  outputs/   rendered HTML files, tables
+  figures/   saved plots
+```
+
+Open the folder as your workspace every time you work on the course:
+
+- **Positron:** **File → Open Folder** and choose `EPI553`.
+- **RStudio:** **File → New Project → Existing Directory** and choose `EPI553` (this creates `EPI553.Rproj`; open that file next time).
+
+R then reads and writes files relative to this folder, so you never need `setwd()`.
+
+## 4. Render the setup check
+
+[Download the setup check (.qmd)](templates/template-setup-check.qmd){.btn .btn-sm .btn-outline-primary download="setup-check.qmd"}
+
+1. Save `setup-check.qmd` in your `EPI553` folder and open it in your IDE.
+2. Render it: the **Preview** button in Positron, or **Render** in RStudio.
+3. The HTML report lists your R version, which course packages are installed, whether the four folders exist, and a test plot and model.
+
+If every check passes, you are ready for the first lab. If a package is missing, run `install.packages("name")` for it and render again. If something else fails, send the HTML report (or a screenshot) to the instructor or TA through Brightspace, or bring it to office hours.

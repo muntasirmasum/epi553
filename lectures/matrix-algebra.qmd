@@ -1,0 +1,863 @@
+---
+title: "Matrix Algebra for Regression"
+subtitle: "How a regression model is written, and solved, with vectors and matrices."
+description: "The design matrix, the normal equations, solving for the coefficients with matrix operations in R, and what multicollinearity does to them."
+order: 3
+unit: "Foundations"
+categories: [Foundations]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture, you will be able to:
+
+- Understand why regression requires matrix algebra
+- Recognize the matrix form of regression: **Y = Xβ**
+- Calculate regression coefficients using **β = (X'X)^(-1)X'Y**
+- Identify multicollinearity problems through singular matrices
+- Interpret error messages like "matrix is singular"
+- Apply these concepts to real public health regression problems
+:::
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(plotly)
+library(car)      # For VIF
+library(NHANES)   # Real US health survey data
+```
+
+## Why Matrix Algebra?
+
+A regression model is a system of linear equations in the unknown coefficients. Matrix algebra is the mathematical engine that allows regression analysis to **scale from a simple two-variable problem to complex models with thousands of predictors.** While you can calculate a simple linear regression using basic arithmetic, it **quickly becomes inefficient and visually cluttered as you add more variables.**
+
+Writing the whole system as matrices lets us:
+
+1. Express the model in one compact line.
+2. Derive the least‑squares solution in closed form (the normal equations).
+3. Compute statistics (variance, covariance, predictions, influence) with matrix formulas.
+4. Solve large problems efficiently with numerical linear‑algebra routines.
+
+Without matrices, a multiple linear regression equation for $n$ observations and $k$ predictors would look like a giant list of individual equations:
+
+$$y_1 = \beta_0 + \beta_1x_{11} + \beta_2x_{12} + \dots + \beta_kx_{1k} + \epsilon_1$$
+$$y_2 = \beta_0 + \beta_1x_{21} + \beta_2x_{22} + \dots + \beta_kx_{2k} + \epsilon_2$$
+$$\vdots$$
+$$y_n = \beta_0 + \beta_1x_{n1} + \beta_2x_{n2} + \dots + \beta_kx_{nk} + \epsilon_n$$
+
+With matrix algebra, this entire system collapses into one elegant expression:
+
+$$\mathbf{y} = \mathbf{X}\boldsymbol{\beta} + \boldsymbol{\epsilon}$$
+
+Modern statistical software (like the survey or gtsummary packages you use in R) doesn't "think" in terms of individual data points. It uses highly optimized linear algebra libraries (like BLAS or LAPACK) to perform these matrix inversions and multiplications. This is what allows you to process large datasets with complex survey designs in seconds rather than hours.
+
+## A Real Public Health Problem
+### The Research Question
+
+**What factors predict systolic blood pressure in US adults, and how do they interact?**
+
+We need to control for multiple risk factors:
+
+- Age (blood pressure increases with age)
+- BMI (obesity is a major hypertension risk factor)
+- Physical activity (exercise lowers blood pressure)
+- Smoking status (affects cardiovascular health)
+
+**This is a multivariable problem** - we need regression, not just correlation!
+
+### The Dataset: NHANES
+
+We'll use the **National Health and Nutrition Examination Survey (NHANES)** - real data from US health surveys (the `NHANES` R package, 2009-2012).
+
+NHANES asks "Do you smoke now?" (`SmokeNow`) only of people who have smoked at least 100 cigarettes in their life (`Smoke100`). Everyone else has a missing `SmokeNow`, so we code people who never smoked 100 cigarettes as **not current smokers** rather than dropping them.
+
+```{r}
+#| label: generate-data
+# Load and prepare NHANES data
+# Focus on adults (21+) with complete blood pressure and predictor data
+set.seed(553)  # For reproducibility
+
+bp_data <- NHANES |>
+  mutate(
+    # Convert Yes/No to 1/0 for regression
+    Physically_Active = ifelse(PhysActive == "Yes", 1, 0),
+    # Never smoked 100 cigarettes = not a current smoker
+    Current_Smoker = case_when(
+      Smoke100 == "No" ~ 0,
+      SmokeNow == "Yes" ~ 1,
+      SmokeNow == "No" ~ 0
+    )
+  ) |>
+  filter(Age >= 21,                    # Adults only
+         !is.na(BPSysAve),             # Must have BP measured
+         !is.na(BMI),                  # Must have BMI
+         !is.na(Physically_Active),    # Physical activity status
+         !is.na(Current_Smoker)) |>    # Current smoking status
+  select(ID, BPSysAve, Age, BMI, Physically_Active, Current_Smoker, Weight, Height) |>
+  slice_sample(n = 200) |>            # Random sample of 200 for clarity
+  arrange(ID)
+
+# Display first 10 rows
+bp_data |>
+  head(10) |>
+  kable(caption = "NHANES Blood Pressure Study Data (First 10 Observations)",
+        digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**What we're looking at:** BPSysAve is systolic blood pressure - values ≥140 mmHg indicate hypertension.
+
+### Summary Statistics
+
+```{r}
+#| label: summary-stats
+# Create a cleaner summary table
+bp_data |>
+  select(-ID) |>
+  summarise(
+    across(everything(),
+           list(Mean = ~round(mean(., na.rm = TRUE), 2),
+                SD = ~round(sd(., na.rm = TRUE), 2),
+                Min = ~round(min(., na.rm = TRUE), 1),
+                Max = ~round(max(., na.rm = TRUE), 1)),
+           .names = "{.col}_{.fn}")
+  ) |>
+  # Split "Physically_Active_Mean" at the last underscore only
+  pivot_longer(everything(),
+               names_to = c("Variable", "Statistic"),
+               names_pattern = "(.*)_(Mean|SD|Min|Max)$",
+               values_to = "Value") |>
+  pivot_wider(names_from = Statistic, values_from = Value) |>
+  kable(caption = "Summary Statistics of NHANES Blood Pressure Data") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Key observations:** Average systolic BP is `r round(mean(bp_data$BPSysAve), 1)` mmHg (SD `r round(sd(bp_data$BPSysAve), 1)`), with considerable variation across participants; `r sum(bp_data$BPSysAve >= 140)` of the `r nrow(bp_data)` people (`r round(100 * mean(bp_data$BPSysAve >= 140))`%) have a reading of 140 mmHg or higher.
+
+### Interactive Exploration
+
+```{r}
+#| label: interactive-scatter
+# Color points by hypertension status (BP >= 140)
+bp_data <- bp_data |>
+  mutate(BP_Status = ifelse(BPSysAve >= 140, "Hypertensive", "Normal"))
+
+plot_ly(bp_data,
+        x = ~BMI,
+        y = ~BPSysAve,
+        color = ~BP_Status,
+        colors = c("Hypertensive" = "red", "Normal" = "steelblue"),
+        text = ~paste("ID:", ID,
+                     "<br>BP:", round(BPSysAve, 1), "mmHg",
+                     "<br>BMI:", round(BMI, 1),
+                     "<br>Age:", Age,
+                     "<br>Active:", ifelse(Physically_Active==1, "Yes", "No")),
+        type = 'scatter',
+        mode = 'markers',
+        marker = list(size = 8, opacity = 0.6)) |>
+  layout(title = "BMI vs Systolic BP in NHANES (Interactive - hover for details)",
+         xaxis = list(title = "Body Mass Index (kg/m²)"),
+         yaxis = list(title = "Systolic Blood Pressure (mmHg)"))
+```
+
+[Figure description: interactive scatter plot of systolic blood pressure against BMI for `r nrow(bp_data)` NHANES adults. BMI runs from about `r round(min(bp_data$BMI))` to `r round(max(bp_data$BMI))` kg/m² and systolic pressure from about `r round(min(bp_data$BPSysAve))` to `r round(max(bp_data$BPSysAve))` mmHg. The `r sum(bp_data$BPSysAve >= 140)` hypertensive readings (140 or higher) are red and sit at the top of the cloud across the whole BMI range; the correlation between BMI and systolic pressure is `r round(cor(bp_data$BMI, bp_data$BPSysAve), 2)`.]{.visually-hidden}
+
+**Question:** Is higher BMI associated with higher blood pressure? Or are other factors confounding this?
+
+**Answer:** We need **multiple regression** to control for age, physical activity, and smoking!
+
+## The Regression Problem: Why We Need Matrices
+
+### What We Want to Estimate
+
+We want to fit this model:
+
+$$\text{BP} = \beta_0 + \beta_1(\text{Age}) + \beta_2(\text{BMI}) + \beta_3(\text{Active}) + \beta_4(\text{Smoker}) + \epsilon$$
+
+With 200 observations and 4 predictors, we have **200 equations** with **5 unknowns** (β₀, β₁, β₂, β₃, β₄). With illustrative values, they look like this:
+
+$$120 = \beta_0 + 35\beta_1 + 28.5\beta_2 + 1\beta_3 + 0\beta_4 + \epsilon_1$$
+$$135 = \beta_0 + 52\beta_1 + 31.2\beta_2 + 0\beta_3 + 1\beta_4 + \epsilon_2$$
+$$\vdots$$
+$$115 = \beta_0 + 41\beta_1 + 24.8\beta_2 + 1\beta_3 + 0\beta_4 + \epsilon_{200}$$
+
+**Writing this by hand is impossible!**
+
+**Solution:** Matrix algebra lets us write this compactly as **Y = Xβ**
+
+## Matrix Notation for Regression
+
+### The Compact Form
+
+Instead of 200 separate equations, we write:
+
+$$\underbrace{\mathbf{Y}}_{n \times 1} = \underbrace{\mathbf{X}}_{n \times (p+1)} \underbrace{\boldsymbol{\beta}}_{(p+1) \times 1} + \underbrace{\boldsymbol{\epsilon}}_{n \times 1}$$
+
+Where:
+
+- **Y** = vector of outcomes (blood pressure values)
+- **X** = matrix of predictors (including intercept column)
+- **β** = vector of coefficients we want to estimate
+- **ε** = vector of errors
+
+### What This Looks Like With Real Data
+
+```{r}
+#| label: matrix-form
+# Create the Y vector (outcomes)
+Y <- bp_data$BPSysAve
+
+# Create the X matrix (predictors + intercept)
+X <- bp_data |>
+  select(Age, BMI, Physically_Active, Current_Smoker) |>
+  mutate(intercept = 1) |>
+  select(intercept, everything()) |>
+  as.matrix()
+
+# Show dimensions
+tibble(
+  Matrix = c("Y (outcomes)", "X (predictors)", "β (coefficients)"),
+  Dimensions = c(
+    paste(length(Y), "× 1"),
+    paste(nrow(X), "×", ncol(X)),
+    paste(ncol(X), "× 1")
+  ),
+  Interpretation = c(
+    "200 blood pressure measurements",
+    "200 observations × 5 columns (1 intercept + 4 predictors)",
+    "5 coefficients to estimate"
+  )
+) |>
+  kable(caption = "Matrix Dimensions for Regression") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Show first 8 rows of X
+X[1:8, ] |>
+  as.data.frame() |>
+  kable(caption = "Design Matrix X (First 8 Rows)", digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Key Point:** 
+
+The first column of X is all 1's (for the intercept β₀), and our binary variables (Physically_Active, Current_Smoker) are coded as 0/1.
+
+In regression analysis, **the intercept ($\beta_0$) represents the expected value of your outcome variable (Blood Pressure) when all your predictors (Age, BMI, etc.) are equal to zero.** While "zero BMI" or "zero Age" isn't physically possible, the intercept provides the essential starting point or "baseline" for the mathematical model.
+
+Since the regression equation is solved by multiplying the X matrix by the $\beta$ vector, we include a column of 1s because When you perform the matrix multiplication $\mathbf{X}\boldsymbol{\beta}$, the first element of each row in $\mathbf{X}$ is multiplied by $\beta_0$. **By making that element 1, you ensure that $\beta_0$ is added to the predicted value exactly as it is ($\beta_0 \times 1 = \beta_0$).**
+
+## Matrix Operations You Need to Know
+
+### 1. Matrix Transpose (X')
+
+**When you need it:** Calculating X'X and X'Y for regression
+
+**What it does:** Flips rows and columns
+
+```{r}
+#| label: transpose-demo
+# Small example with health data (first 3 NHANES participants)
+small_example <- X[1:3, ]
+rownames(small_example) <- paste("Person", 1:3)
+
+small_example |>
+  kable(caption = "Original Matrix (People × Variables)", digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+t(small_example) |>
+  kable(caption = "Transposed Matrix (Variables × People)", digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Why this matters:** X'X gives us sums of squares and cross-products we need for regression - notice how transposing flips the matrix so we can multiply X'X.
+
+### 2. Matrix Multiplication (X'X)
+
+**When you need it:** This is the key step in calculating regression coefficients
+
+Let's look at the data with 200 observations in it (these values could be different depending on the random sample).
+
+```{r}
+#| label: xtx-calculation
+# Calculate X'X for our blood pressure data
+XtX <- t(X) %*% X
+
+XtX |>
+  kable(caption = "X'X Matrix (Sum of Squares and Cross Products)",
+        digits = 0) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**What do these numbers mean?**
+
+- **Diagonal:** Sum of squares for each variable
+  - `XtX[2,2]` = Sum of (Age)²
+  - `XtX[3,3]` = Sum of (BMI)²
+
+- **Off-diagonal:** Cross products between variables
+  - `XtX[2,3]` = Sum of (Age × BMI)
+
+```{r}
+#| label: xtx-interpretation
+# Show what's in X'X
+tibble(
+  Element = c("XtX[1,1]", "XtX[2,2]", "XtX[2,3]"),
+  Calculation = c(
+    "Sum of 1² (n observations)",
+    "Sum of (Age)²",
+    "Sum of (Age × BMI)"
+  ),
+  Value = c(
+    XtX[1,1],
+    XtX[2,2],
+    XtX[2,3]
+  )
+) |>
+  kable(caption = "Interpreting X'X Elements", digits = 0) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Verify one calculation
+tibble(
+  Method = c("From X'X", "Manual calculation"),
+  Result = c(
+    XtX[2,2],
+    sum(bp_data$Age^2)
+  )
+) |>
+  kable(caption = "Verification: XtX[2,2] = Sum of (Age)²") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Interpretation:** 
+
+The diagonal shows variability in each predictor, off-diagonal shows how predictors co-vary.
+
+### 3. Matrix Inverse: (X'X)^(-1)
+
+**When you need it:** This is THE critical step for calculating β
+
+**What it does:** The matrix equivalent of division
+
+**Important:** Only works if X'X is **not singular** (determinant ≠ 0)
+
+```{r}
+#| label: matrix-inverse
+# Calculate the inverse
+XtX_inv <- solve(XtX)
+
+XtX_inv |>
+  kable(caption = "(X'X)^(-1): The Inverse Matrix",
+        digits = 6) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Verify: X'X × (X'X)^(-1) should equal the identity matrix
+verification <- XtX %*% XtX_inv
+
+verification |>
+  round(10) |>  # Round to avoid floating point display issues
+  kable(caption = "Verification: X'X × (X'X)^(-1) = I (Identity Matrix)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**The identity matrix** has 1's on diagonal, 0's elsewhere - it's like multiplying by 1!
+
+## The Magic Formula: Calculating Beta
+
+### The Normal Equations
+
+Starting from **Y = Xβ**, we derive:
+
+$$\boldsymbol{\beta} = (\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{Y}$$
+
+**This is how R calculates regression coefficients in `lm()`!**
+
+### Step-by-Step Calculation
+
+```{r}
+#| label: calculate-beta
+# Step 1: Calculate X'Y
+XtY <- t(X) %*% Y
+
+data.frame(
+  Component = c("X'Y"),
+  Dimensions = paste(nrow(XtY), "× 1"),
+  Interpretation = "Cross products of predictors with outcome"
+) |>
+  kable(caption = "Step 1: Calculate X'Y") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+XtY |>
+  as.data.frame() |>
+  rownames_to_column("Variable") |>
+  rename(Value = V1) |>
+  kable(caption = "X'Y Values", digits = 0) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Step 2: Calculate beta = (X'X)^(-1) × X'Y
+beta_hat <- XtX_inv %*% XtY
+```
+
+```{r}
+#| echo: false
+# Display results
+results_df <- data.frame(
+  Coefficient = c("β₀ (Intercept)",
+                  "β₁ (Age)",
+                  "β₂ (BMI)",
+                  "β₃ (Physically Active)",
+                  "β₄ (Current Smoker)"),
+  Estimate = as.vector(beta_hat),
+  Interpretation = c(
+    "Baseline systolic BP (mmHg)",
+    "Change per 1 year increase in age",
+    "Change per 1 unit increase in BMI",
+    "Difference for physically active individuals",
+    "Difference for current smokers"
+  )
+)
+
+results_df |>
+  kable(caption = "Estimated Regression Coefficients (Manual Matrix Calculation)",
+        digits = 2) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+### Verification with lm()
+
+Does our manual matrix calculation match R's `lm()`?
+
+```{r}
+#| label: verify-lm
+# Fit the same model using lm()
+model <- lm(BPSysAve ~ Age + BMI + Physically_Active + Current_Smoker,
+            data = bp_data)
+
+# Compare results
+comparison <- data.frame(
+  Coefficient = c("Intercept", "Age", "BMI", "Physically_Active", "Current_Smoker"),
+  Matrix_Calculation = as.vector(beta_hat),
+  lm_Function = coef(model)
+)
+
+comparison |>
+  kable(caption = "Comparison: Manual vs lm()",
+        digits = 4) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**They match perfectly!** This proves that `lm()` uses the matrix formula β = (X'X)^(-1)X'Y internally.
+
+## Interpreting the Results
+
+### What Do These Coefficients Tell Us?
+
+```{r}
+#| label: interpretation-viz
+#| echo: false
+# Create interpretation table
+p_vals <- summary(model)$coefficients[2:5, "Pr(>|t|)"]
+units <- c("each additional year of age", "each 1-unit higher BMI",
+           "being physically active", "being a current smoker")
+interpretation <- data.frame(
+  Predictor = c("Age", "BMI", "Physically Active", "Current Smoker"),
+  Effect = paste0(ifelse(beta_hat[2:5] >= 0, "+", ""),
+                  round(beta_hat[2:5], 2), " mmHg"),
+  p_value = format.pval(p_vals, digits = 2, eps = 0.001),
+  row.names = NULL,
+  Meaning = ifelse(
+    p_vals < 0.05,
+    paste0("BP is ", ifelse(beta_hat[2:5] > 0, "higher", "lower"),
+           " with ", units, " (statistically significant)"),
+    paste0("No clear association with ", units, " (not statistically significant)")
+  )
+)
+
+interpretation |>
+  kable(caption = "Clinical Interpretation of Regression Coefficients") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Interactive coefficient plot
+coef_plot_data <- data.frame(
+  Variable = c("Age", "BMI", "Physically_Active", "Current_Smoker"),
+  Coefficient = beta_hat[2:5],
+  SE = sqrt(diag(vcov(model)))[2:5]
+)
+
+plot_ly(coef_plot_data, x = ~Variable, y = ~Coefficient,
+        error_y = list(array = ~SE, color = 'rgba(0,0,0,0.3)'),
+        type = 'scatter', mode = 'markers',
+        marker = list(size = 12, color = 'steelblue')) |>
+  layout(title = "Regression Coefficients with Standard Errors",
+         yaxis = list(title = "Effect on Systolic BP (mmHg)"),
+         xaxis = list(title = ""),
+         hovermode = 'closest')
+```
+
+[Figure description: interactive dot plot of the four regression coefficients with standard-error bars. Age `r sprintf("%+.2f", beta_hat[2])` (SE `r sprintf("%.2f", sqrt(diag(vcov(model)))[2])`), BMI `r sprintf("%+.2f", beta_hat[3])` (SE `r sprintf("%.2f", sqrt(diag(vcov(model)))[3])`), physically active `r sprintf("%+.2f", beta_hat[4])` (SE `r sprintf("%.2f", sqrt(diag(vcov(model)))[4])`), current smoker `r sprintf("%+.2f", beta_hat[5])` (SE `r sprintf("%.2f", sqrt(diag(vcov(model)))[5])`) mmHg. The two binary predictors have much wider bars than age and BMI.]{.visually-hidden}
+
+**Key finding:** Each additional year of age is associated with a `r round(abs(beta_hat[2]), 2)` mmHg `r ifelse(beta_hat[2] > 0, "increase", "decrease")` in systolic BP, controlling for the other factors (`r ifelse(p_vals[1] < 0.001, "p < 0.001", paste("p =", signif(p_vals[1], 2)))`). Because age is measured in years, its coefficient looks small, but over 30 years it adds up to about `r round(30 * beta_hat[2])` mmHg.
+
+### Predicted vs Observed
+
+```{r}
+#| label: predicted-obs
+# Add predictions to data
+bp_data$predicted <- as.vector(X %*% beta_hat)
+bp_data$residual <- bp_data$BPSysAve - bp_data$predicted
+
+# Interactive plot
+plot_ly(bp_data,
+        x = ~predicted,
+        y = ~BPSysAve,
+        color = ~BP_Status,
+        colors = c("Hypertensive" = "red", "Normal" = "steelblue"),
+        text = ~paste("ID:", ID,
+                     "<br>Observed BP:", round(BPSysAve, 1), "mmHg",
+                     "<br>Predicted:", round(predicted, 1), "mmHg",
+                     "<br>Residual:", round(residual, 1),
+                     "<br>Status:", BP_Status),
+        type = 'scatter',
+        mode = 'markers',
+        marker = list(size = 8, opacity = 0.6)) |>
+  add_trace(x = c(min(bp_data$predicted), max(bp_data$predicted)),
+            y = c(min(bp_data$predicted), max(bp_data$predicted)),
+            type = 'scatter', mode = 'lines',
+            line = list(color = 'black', dash = 'dash'),
+            name = 'Perfect Prediction',
+            showlegend = TRUE,
+            inherit = FALSE) |>
+  layout(title = "Predicted vs Observed Systolic BP",
+         xaxis = list(title = "Predicted Systolic BP (mmHg)"),
+         yaxis = list(title = "Observed Systolic BP (mmHg)"))
+```
+
+[Figure description: interactive scatter plot of observed against predicted systolic blood pressure, with a dashed diagonal line for perfect prediction. Predictions span only about `r round(min(bp_data$predicted))` to `r round(max(bp_data$predicted))` mmHg while observed values span `r round(min(bp_data$BPSysAve))` to `r round(max(bp_data$BPSysAve))` mmHg, so most points sit well above or below the line; the model explains `r round(100 * summary(model)$r.squared)`% of the variation (R² = `r round(summary(model)$r.squared, 2)`).]{.visually-hidden}
+
+**Points close to the diagonal line** are well-predicted by our model; **points far from the line** have large residuals (prediction errors).
+
+## When Things Go Wrong: Multicollinearity
+
+### What is Multicollinearity?
+
+**Multicollinearity** = When predictor variables are highly correlated with each other
+
+**Why it matters:** If one predictor is an exact combination of others (perfect collinearity), X'X is **singular** (non-invertible) and β cannot be calculated at all. If predictors are strongly but not perfectly related, X'X is **nearly singular**: β can be calculated, but small changes in the data move it a lot, and the standard errors grow.
+
+### Real Example: The Redundant Variable Problem
+
+Let's try to include both **Weight** and **BMI** as predictors. Problem: BMI is calculated FROM weight and height!
+
+```{r}
+#| label: multicollinearity-demo
+# Check if we have the variables needed
+bp_data_check <- bp_data |>
+  filter(!is.na(Weight), !is.na(Height))
+
+# BMI is weight(kg) / height(m)²
+# Since we already have BMI, let's show the relationship
+cor_check <- cor(bp_data_check[, c("Weight", "BMI", "Height")],
+                 use = "complete.obs")
+
+cor_check |>
+  kable(caption = "Correlation Matrix: Weight, BMI, and Height",
+        digits = 3) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Try to fit regression with both Weight and BMI
+X_bad <- bp_data_check |>
+  select(Age, BMI, Weight, Physically_Active, Current_Smoker) |>
+  mutate(intercept = 1) |>
+  select(intercept, everything()) |>
+  as.matrix()
+
+# What happens to X'X?
+XtX_bad <- t(X_bad) %*% X_bad
+
+# How close to singular? The condition number (largest / smallest
+# eigenvalue) grows as predictors become closer to linear combinations of
+# each other. We compute it on the predictors' correlation matrix so the
+# units of the variables do not matter (the determinant of X'X does depend
+# on units, which makes it a poor guide).
+cond_good <- kappa(cor(X[, -1]), exact = TRUE)
+cond_bad <- kappa(cor(X_bad[, -1]), exact = TRUE)
+
+data.frame(
+  Predictors = c("Age, BMI, Active, Smoker", "Age, BMI, Weight, Active, Smoker"),
+  Condition_number = round(c(cond_good, cond_bad), 1)
+) |>
+  kable(caption = "Adding Weight makes X'X much closer to singular") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**The issue:** Weight and BMI are highly correlated (r = `r round(cor_check["Weight", "BMI"], 2)`). Adding Weight raises the condition number of the predictors from `r round(cond_good, 1)` to `r round(cond_bad, 1)`, about `r round(cond_bad / cond_good)` times larger: X'X is closer to singular, though still far from the values (in the hundreds or thousands) that make inversion numerically unreliable.
+
+### What Happens When You Try?
+
+```{r}
+#| label: try-bad-regression
+# Fit with lm(): it runs without complaint, so look at the standard errors
+model_bad <- lm(BPSysAve ~ Age + BMI + Weight + Physically_Active + Current_Smoker,
+                data = bp_data_check)
+
+tibble(Variable = names(coef(model_bad)), Coefficient = coef(model_bad)) |>
+  kable(caption = "lm() Output with Both BMI and Weight",
+        digits = 4) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Check standard errors - they'll be inflated!
+summary(model_bad)$coefficients |>
+  as.data.frame() |>
+  rownames_to_column("Variable") |>
+  select(Variable, Estimate, `Std. Error`) |>
+  kable(caption = "Notice the Large Standard Errors!",
+        digits = 4) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**The problem:** Coefficients are still estimated, but the standard errors grow. The standard error for BMI is `r round(summary(model)$coefficients["BMI", "Std. Error"], 2)` in the original model and `r round(summary(model_bad)$coefficients["BMI", "Std. Error"], 2)` once Weight is added (`r round(summary(model_bad)$coefficients["BMI", "Std. Error"] / summary(model)$coefficients["BMI", "Std. Error"], 1)` times larger). That loss of precision is what multicollinearity does.
+
+### Diagnosing Multicollinearity with VIF
+
+```{r}
+#| label: realistic-multicollinearity
+# Check VIF (Variance Inflation Factor) for the problematic model
+vif_values <- vif(model_bad)
+
+data.frame(
+  Variable = names(vif_values),
+  VIF = vif_values,
+  Problem = ifelse(vif_values > 5, "High (above 5)", "Below 5")
+) |>
+  kable(caption = "Variance Inflation Factors (VIF > 5 indicates multicollinearity)",
+        digits = 2) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Compare with the good model (without Weight)
+vif_values_good <- vif(model)
+
+data.frame(
+  Variable = names(vif_values_good),
+  VIF = vif_values_good,
+  Problem = ifelse(vif_values_good > 5, "High (above 5)", "Below 5")
+) |>
+  kable(caption = "VIF for Original Model (Without Weight)",
+        digits = 2) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Rule of thumb:** VIF > 5-10 indicates serious multicollinearity. Here the VIFs for BMI and Weight are `r round(vif_values["BMI"], 1)` and `r round(vif_values["Weight"], 1)` (the variance of each estimate is that many times larger than it would be with uncorrelated predictors), compared with `r round(vif_values_good["BMI"], 1)` for BMI without Weight. `r if (max(vif_values[c("BMI", "Weight")]) > 5) "That is above the usual cutoff of 5." else "That is clearly inflated but still under the usual cutoff of 5: BMI and Weight are strongly related, yet Height gives Weight information that BMI does not, so they are not fully redundant. Cutoffs are guides, not tests."`
+
+## Practical Takeaways for Your Research
+
+### When You'll Use This
+
+```{r}
+#| label: practical-scenarios
+#| echo: false
+scenarios <- data.frame(
+  Scenario = c(
+    "Running multiple regression in R",
+    "Error: 'system is computationally singular'",
+    "Unstable coefficient estimates",
+    "Understanding regression output",
+    "Checking model assumptions"
+  ),
+  Matrix_Concept_Involved = c(
+    "β = (X'X)⁻¹X'Y is being calculated",
+    "X'X is singular (can't be inverted)",
+    "X'X is nearly singular (multicollinearity)",
+    "Understanding where coefficients come from",
+    "Residuals = Y - Xβ"
+  ),
+  What_To_Do = c(
+    "Nothing - lm() handles it automatically",
+    "Remove redundant variables",
+    "Check VIF, remove highly correlated predictors",
+    "Know that lm() uses matrix algebra",
+    "Check correlation matrix of predictors"
+  )
+)
+
+scenarios |>
+  kable(caption = "When You'll Encounter These Concepts") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+### Quick Reference: Matrix Operations in R
+
+```{r}
+#| label: quick-reference
+#| echo: false
+reference <- data.frame(
+  Operation = c(
+    "Transpose",
+    "Matrix multiplication",
+    "Inverse",
+    "Correlation matrix",
+    "Check multicollinearity"
+  ),
+  R_Code = c(
+    "t(X)",
+    "X %*% Y",
+    "solve(X)",
+    "cor(data)",
+    "vif(model)"
+  ),
+  When_You_Need_It = c(
+    "Calculating X'X or X'Y",
+    "Calculating regression components",
+    "Solving for β coefficients",
+    "Checking for multicollinearity",
+    "Diagnosing unstable models"
+  )
+)
+
+reference |>
+  kable(caption = "Essential R Commands for Matrix Operations") |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Summary: The Big Picture
+
+### What We Learned
+
+1. **Multivariable regression** requires solving many equations simultaneously
+2. **Matrix notation** (Y = Xβ) makes this manageable
+3. **The solution** is β = (X'X)^(-1)X'Y
+4. **Perfect collinearity** breaks the inversion step; strong collinearity makes it unstable
+5. **R does this automatically**, but knowing the math helps you troubleshoot!
+
+### The Formula You Should Remember
+
+$$\boxed{\boldsymbol{\beta} = (\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{Y}}$$
+
+**Translation:** To get regression coefficients, we:
+
+1. Calculate X'X (sum of squares and cross products)
+2. Invert it (possible unless predictors are perfectly collinear)
+3. Multiply by X'Y (cross products with outcome)
+
+### Key Diagnostic: Check Your Correlation Matrix
+
+```{r}
+#| label: final-diagnostic
+# Always check this before running regression!
+bp_data |>
+  select(Age, BMI, Physically_Active, Current_Smoker) |>
+  cor() |>
+  kable(caption = "Predictor Correlation Matrix - Check Before Regression!",
+        digits = 3) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Visualize correlations
+cor_matrix <- cor(bp_data[, c("Age", "BMI", "Physically_Active", "Current_Smoker")])
+
+plot_ly(
+  x = colnames(cor_matrix),
+  y = rownames(cor_matrix),
+  z = cor_matrix,
+  type = "heatmap",
+  colors = colorRamp(c("blue", "white", "red")),
+  zmin = -1, zmax = 1
+) |>
+  layout(title = "Correlation Heatmap of Predictors (Interactive)")
+```
+
+[Figure description: interactive heatmap of correlations among age, BMI, physical activity, and current smoking, colored from blue (-1) through white (0) to red (+1). The diagonal is 1; every off-diagonal correlation is between `r round(min(cor_matrix[upper.tri(cor_matrix)]), 2)` and `r round(max(cor_matrix[upper.tri(cor_matrix)]), 2)`, so the off-diagonal cells are close to white.]{.visually-hidden}
+
+**If any correlation is > 0.8, consider removing one of the variables!** The largest correlation between two of our predictors is `r round(max(abs(cor_matrix[upper.tri(cor_matrix)])), 2)`, `r ifelse(max(abs(cor_matrix[upper.tri(cor_matrix)])) > 0.8, "above", "well below")` this threshold.
+
+## Practice Activity
+
+### Your Turn: Analyze Cholesterol Data
+
+Using what you've learned, analyze total cholesterol in NHANES:
+
+```{r}
+#| label: practice-data
+# Prepare cholesterol data from NHANES
+chol_data <- NHANES |>
+  mutate(
+    Physically_Active = ifelse(PhysActive == "Yes", 1, 0),
+    Current_Smoker = case_when(
+      Smoke100 == "No" ~ 0,
+      SmokeNow == "Yes" ~ 1,
+      SmokeNow == "No" ~ 0
+    )
+  ) |>
+  filter(Age >= 21,
+         !is.na(TotChol),            # Total cholesterol
+         !is.na(BMI),
+         !is.na(Physically_Active),
+         !is.na(Current_Smoker)) |>
+  select(ID, TotChol, Age, BMI, Physically_Active, Current_Smoker) |>
+  slice_sample(n = 150) |>
+  arrange(ID)
+
+chol_data |>
+  head(10) |>
+  kable(caption = "NHANES Cholesterol Data (First 10 Observations)",
+        digits = 1) |>
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Research Question:** What factors predict total cholesterol in US adults?
+
+**Tasks:**
+
+1. Check the correlation matrix - any multicollinearity concerns?
+2. Create the design matrix X (with intercept)
+3. Calculate X'X manually
+4. Fit the model using lm()
+5. Compare your X'X calculation with what lm() uses
+6. Calculate VIF for each predictor
+7. Interpret the coefficients - which factor has the strongest effect on cholesterol?
+
+```{r}
+#| label: practice-solution
+#| eval: false
+# Your code here:
+
+# 1. Correlation matrix
+cor(chol_data |> select(Age, BMI, Physically_Active, Current_Smoker))
+
+# 2. Create X matrix
+Y_practice <- chol_data$TotChol
+X_practice <- chol_data |>
+  select(Age, BMI, Physically_Active, Current_Smoker) |>
+  mutate(intercept = 1) |>
+  select(intercept, everything()) |>
+  as.matrix()
+
+# 3. Calculate X'X
+XtX_practice <- t(X_practice) %*% X_practice
+
+# 4. Fit model
+model_practice <- lm(TotChol ~ Age + BMI + Physically_Active + Current_Smoker,
+                     data = chol_data)
+
+# 5. Compare - calculate beta manually
+beta_practice <- solve(XtX_practice) %*% (t(X_practice) %*% Y_practice)
+
+# 6. Check VIF
+vif(model_practice)
+
+# 7. Interpret coefficients
+summary(model_practice)
+```
+
+**Next lecture:** [Statistical Modeling in Epidemiology](statistical-modeling.qmd).
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

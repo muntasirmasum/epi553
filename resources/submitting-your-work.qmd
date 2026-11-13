@@ -1,0 +1,63 @@
+---
+title: "Submitting Your Work"
+subtitle: "Render your file to a single HTML page and upload it, with its source, to Brightspace."
+description: "How to render a Quarto (or R Markdown) file to a self-contained HTML file in Positron or RStudio, name it, and upload both files to Brightspace."
+order: 4
+unit: "Getting started"
+categories: [Resources]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## In short
+
+For every lab and assignment, upload **two files** to the Brightspace assignment:
+
+1. your source file (`.qmd`, or `.Rmd` if you prefer R Markdown), and
+2. the rendered **HTML** file, made so that it opens on its own.
+:::
+
+## 1. Make the HTML self-contained
+
+A rendered HTML file normally keeps its figures in a separate folder. Brightspace receives only the file you upload, so the figures must be inside the HTML. Put this in the YAML header at the top of your `.qmd`:
+
+```yaml
+---
+title: "Lab 1: Exploring NHANES"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+---
+```
+
+The lab templates on this site already include it.
+
+**Using an `.Rmd` file?** In RStudio, **Knit** with `output: html_document` embeds figures by default. In **Positron**, an `.Rmd` is rendered by Quarto, which ignores `output:`, so add the same `format: html: embed-resources: true` lines to its YAML header (or use the command **R: Render Document With R Markdown** from the Command Palette).
+
+## 2. Render
+
+- **Positron:** click **Preview** at the top right of the editor (or open the Command Palette and run **Quarto: Render Document**).
+- **RStudio:** click **Render** (or **Knit** for an `.Rmd`).
+
+The HTML file is saved next to your `.qmd`, with the same name. **Check two things before you upload:**
+
+- Open the HTML in your browser and scroll through it: every code chunk should have run, every plot should appear, and every question should be answered.
+- There should be **no folder** named `yourfile_files` next to it. If there is, the figures are not inside the HTML: check the YAML header above and render again.
+
+::: {.callout-warning}
+## If rendering fails
+
+Read the first error message (in Positron it appears in the Terminal panel; in RStudio, in the Background Jobs or Render pane); it names the chunk and line. The most common causes are a missing package (`install.packages("name")`), an object used before the chunk that creates it, or a file path that only works on your computer. Fix it and render again: a file that does not render cannot be graded.
+:::
+
+## 3. Name your files
+
+Use `LastName_FirstName_LabNumber`, for example `Rivera_Ana_Lab03.qmd` and `Rivera_Ana_Lab03.html`. Rename the `.qmd` *before* rendering so the HTML gets the same name.
+
+## 4. Upload to Brightspace
+
+1. Open the course in Brightspace and go to the assignment.
+2. Upload both files (`.qmd` and `.html`) in the same submission.
+3. Submit, and check that the submission confirmation lists both files.
+
+Due dates and grading policies are in the syllabus and the assignment on Brightspace.

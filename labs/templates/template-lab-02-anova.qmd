@@ -1,0 +1,146 @@
+---
+title: "Lab 2: One-Way ANOVA (Part B)"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+library(tidyverse)
+library(knitr)
+library(car)
+library(NHANES)
+
+data(NHANES)
+set.seed(553)
+
+# Groups by days of moderate or vigorous activity in a typical week
+# 2009-2010 only: in that cycle active days were asked of exactly the active
+mental_health_data <- NHANES |>
+  filter(SurveyYr == "2009_10") |>
+  filter(Age >= 18) |>
+  filter(!is.na(DaysMentHlthBad) & !is.na(PhysActive)) |>
+  mutate(
+    activity_level = case_when(
+      PhysActive == "No" ~ "None",
+      PhysActive == "Yes" & !is.na(PhysActiveDays) & PhysActiveDays < 3 ~ "1-2 days",
+      PhysActive == "Yes" & !is.na(PhysActiveDays) & PhysActiveDays >= 3 ~ "3+ days",
+      TRUE ~ NA_character_
+    ),
+    activity_level = factor(activity_level, levels = c("None", "1-2 days", "3+ days"))
+  ) |>
+  filter(!is.na(activity_level)) |>
+  select(ID, Age, Gender, DaysMentHlthBad, PhysActive, activity_level)
+```
+
+## Step 1: Data preparation
+
+```{r}
+#| label: step1
+# Display the first 6 rows and check sample sizes
+
+```
+
+How many people are in each group?
+
+- None:
+- 1-2 days:
+- 3+ days:
+
+## Step 2: Descriptive statistics
+
+```{r}
+#| label: step2
+# n, Mean, SD, Median, Min, Max by activity level
+
+```
+
+Which group has the highest mean number of bad mental health days? Which has the lowest?
+
+## Step 3: Visualization
+
+```{r}
+#| label: step3
+# Boxplots of DaysMentHlthBad by activity level
+
+```
+
+Do the groups appear to differ? Are the variances similar across groups?
+
+## Step 4: Hypotheses
+
+**H₀:**
+
+**H₁:**
+
+**α =**
+
+## Step 5: Fit the ANOVA model
+
+```{r}
+#| label: step5
+
+```
+
+- F-statistic:
+- Degrees of freedom:
+- p-value:
+- Decision (reject or fail to reject H₀):
+- Conclusion in words:
+
+## Step 6: Post-hoc tests
+
+```{r}
+#| label: step6
+
+```
+
+| Comparison | Mean Difference | 95% CI Lower | 95% CI Upper | p-value | Significant? |
+|------------|-----------------|--------------|--------------|---------|--------------|
+| 1-2 days - None |  |  |  |  |  |
+| 3+ days - None |  |  |  |  |  |
+| 3+ days - 1-2 days |  |  |  |  |  |
+
+Which specific groups differ significantly?
+
+## Step 7: Effect size
+
+```{r}
+#| label: step7
+
+```
+
+- η² =
+- Percentage of variance explained:
+- Effect size (small / medium / large):
+- What does this mean practically?
+
+## Step 8: Assumptions
+
+```{r}
+#| label: step8
+
+```
+
+1. Residuals vs Fitted:
+2. Q-Q plot:
+3. Scale-Location:
+4. Residuals vs Leverage:
+5. Levene's test result:
+
+Are the assumptions reasonably met? Do any violations threaten your conclusions?
+
+## Step 9: Results
+
+*Write a 2-3 paragraph results section: sample and descriptive statistics, the F-test, post-hoc comparisons, effect size, and public health significance.*
+
+## Reflection questions
+
+1. How does the effect size help you understand practical vs. statistical significance?
+2. Why is it important to check ANOVA assumptions? What might happen if they're violated?
+3. In public health practice, when might you choose to use ANOVA?
+4. What was the most challenging part of this lab?

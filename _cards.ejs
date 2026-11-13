@@ -1,0 +1,18 @@
+```{=html}
+<ul class="lecture-grid list">
+<% for (const item of items) {
+     const kind = item.kind || "";
+     const num = (typeof item.order === "number" && kind !== "Resource")
+       ? String(item.order).padStart(2, "0") : "";
+     const label = [kind, num].filter(Boolean).join(" ");
+%>
+  <li <%= metadataAttrs(item) %>>
+    <article class="lecture-card">
+      <span class="eyebrow"><%= label %><% if (label && item.unit) { %> · <% } %><% if (item.unit) { %><span class="lecture-unit"><%= item.unit %></span><% } %></span>
+      <h2 class="listing-title"><a href="<%- item.path %>" class="stretched-link"><%= item.title %></a></h2>
+      <% if (item.description) { %><p class="listing-description"><%= item.description %></p><% } %>
+    </article>
+  </li>
+<% } %>
+</ul>
+```

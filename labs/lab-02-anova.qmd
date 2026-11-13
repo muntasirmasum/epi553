@@ -1,0 +1,576 @@
+---
+title: "Lab 2: One-Way ANOVA"
+subtitle: "Test whether blood pressure differs across BMI groups, then check the assumptions."
+description: "A guided ANOVA of systolic blood pressure by BMI category in NHANES, with Tukey comparisons and assumption checks, then a practice problem on mental health days and activity."
+order: 2
+unit: "Foundations"
+categories: [Labs]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+**Time:** about 30 minutes. **Goal:** practice one-way ANOVA from start to finish using real public health data.
+
+- Understand when and why to use ANOVA instead of multiple t-tests
+- Set up hypotheses for ANOVA
+- Conduct and interpret the F-test
+- Perform post-hoc tests when appropriate
+- Check ANOVA assumptions
+- Calculate and interpret effect size (η²)
+:::
+
+**Structure:** **Part A** is a guided example to follow along; **Part B** is independent practice in your own file.
+
+::: {.data-card}
+[Lab files]{.eyebrow}
+
+Do Part B in your own `.qmd` file. The template has the YAML header, the data preparation code, and every step ready to fill in.
+
+[Download the Lab 2 template (.qmd)](templates/template-lab-02-anova.qmd){.btn .btn-sm .btn-outline-primary download="lab-02-anova.qmd"}
+:::
+
+**Submission:** Render your Part B file and upload both the `.qmd` and the HTML file to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+## PART A: GUIDED EXAMPLE
+
+### Example: Blood Pressure and BMI Categories
+
+#### **Research Question:** Is there a difference in mean systolic blood pressure (SBP) across three BMI categories (Normal weight, Overweight, Obese)?
+
+**Why ANOVA?** We have one continuous outcome (SBP) and one categorical predictor with THREE groups (BMI category). Using multiple t-tests would inflate our Type I error rate.
+
+#### Step 1: Setup and Data Preparation
+
+```{r}
+#| label: load-packages
+#| message: false
+# Load necessary libraries
+library(tidyverse)   # For data manipulation and visualization
+library(knitr)       # For nice tables
+library(car)         # For Levene's test
+library(NHANES)      # NHANES dataset
+
+# Load the NHANES data
+data(NHANES)
+```
+
+**Create analysis dataset:**
+
+```{r}
+#| label: example-data-prep
+# Set seed for reproducibility
+set.seed(553)
+
+# Create BMI categories and prepare data
+bp_bmi_data <- NHANES |>
+  filter(Age >= 18 & Age <= 65) |>  # Adults 18-65
+  filter(!is.na(BPSysAve) & !is.na(BMI)) |>
+  filter(BMI >= 18.5) |>  # drop underweight so "Normal" means BMI 18.5-24.9
+  mutate(
+    bmi_category = case_when(
+      BMI < 25 ~ "Normal",  # 18.5 to 24.9
+      BMI >= 25 & BMI < 30 ~ "Overweight",
+      BMI >= 30 ~ "Obese",
+      TRUE ~ NA_character_
+    ),
+    bmi_category = factor(bmi_category, 
+                         levels = c("Normal", "Overweight", "Obese"))
+  ) |>
+  filter(!is.na(bmi_category)) |>
+  select(ID, Age, Gender, BPSysAve, BMI, bmi_category)
+
+# Display first few rows
+head(bp_bmi_data) |> 
+  kable(caption = "Blood Pressure and BMI Dataset (first 6 rows)")
+
+# Check sample sizes
+table(bp_bmi_data$bmi_category)
+```
+
+**Interpretation:** We have `r nrow(bp_bmi_data)` adults with complete BP and BMI data across three BMI categories.
+
+#### Step 2: Descriptive Statistics
+
+```{r}
+#| label: example-descriptives
+# Calculate summary statistics by BMI category
+summary_stats <- bp_bmi_data |>
+  group_by(bmi_category) |>
+  summarise(
+    n = n(),
+    Mean = mean(BPSysAve),
+    SD = sd(BPSysAve),
+    Median = median(BPSysAve),
+    Min = min(BPSysAve),
+    Max = max(BPSysAve)
+  )
+
+summary_stats |> 
+  kable(digits = 2, 
+        caption = "Descriptive Statistics: Systolic BP by BMI Category")
+```
+
+**Observation:** The mean SBP appears to increase from Normal (`r round(summary_stats$Mean[1], 1)`) to Overweight (`r round(summary_stats$Mean[2], 1)`) to Obese (`r round(summary_stats$Mean[3], 1)`). 
+
+#### But is this difference statistically significant?
+
+#### Step 3: Visualize the Data
+
+```{r}
+#| label: fig-sbp-bmi
+#| fig-cap: "Systolic blood pressure by BMI category, NHANES adults 18-65"
+#| fig-alt: !expr sprintf("Box plots with jittered points of systolic blood pressure for normal-weight, overweight, and obese adults aged 18 to 65. Medians rise from about %.0f mmHg (normal) to %.0f (overweight) and %.0f (obese); the boxes overlap and values range from %.0f to %.0f mmHg.", summary_stats$Median[1], summary_stats$Median[2], summary_stats$Median[3], min(summary_stats$Min), max(summary_stats$Max))
+# Create boxplots with individual points
+ggplot(bp_bmi_data, 
+  aes(x = bmi_category, y = BPSysAve, fill = bmi_category)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.1, size = 0.5) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Systolic Blood Pressure by BMI Category",
+    subtitle = "NHANES Data, Adults aged 18-65",
+    x = "BMI Category",
+    y = "Systolic Blood Pressure (mmHg)",
+    fill = "BMI Category"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+**What the plot tells us:**
+
+- There appears to be a trend: higher BMI categories have higher median SBP
+- The boxes overlap, but the obese group appears shifted upward
+- Variability (box heights) looks similar across groups
+
+#### Step 4: Set Up Hypotheses
+
+**Null Hypothesis (H₀):** μ_Normal = μ_Overweight = μ_Obese  
+(All three population means are equal)
+
+**Alternative Hypothesis (H₁):** At least one population mean differs from the others
+
+**Significance level:** α = 0.05
+
+#### Step 5: Fit the ANOVA Model
+
+```{r}
+#| label: example-anova
+# Fit the one-way ANOVA model
+anova_model <- aov(BPSysAve ~ bmi_category, data = bp_bmi_data)
+
+# Display the ANOVA table
+summary(anova_model)
+```
+
+```{r}
+#| label: example-anova-values
+#| echo: false
+f_value <- summary(anova_model)[[1]]$"F value"[1]
+p_f <- summary(anova_model)[[1]]$"Pr(>F)"[1]
+df_error <- summary(anova_model)[[1]]$Df[2]
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+```
+
+**Interpretation:**
+
+- **F-statistic:** `r round(f_value, 2)`
+- **Degrees of freedom:** df₁ = 2 (k-1 groups), df₂ = `r df_error` (n-k)
+- **p-value:** `r format.pval(p_f, digits = 3)`
+- **Decision:** `r if (p_f < 0.05) "Since p < 0.05, we **reject H₀**" else "Since p ≥ 0.05, we **fail to reject H₀**"`
+- **Conclusion:** `r if (p_f < 0.05) "There is statistically significant evidence that mean systolic BP differs across at least two BMI categories." else "There is not statistically significant evidence that mean systolic BP differs across BMI categories."`
+
+#### Step 6: Post-Hoc Tests (Tukey HSD)
+
+**Why do we need this?** The F-test tells us *that* groups differ, but not *which* groups differ. Tukey's Honest Significant Difference controls the family-wise error rate for multiple pairwise comparisons.
+
+```{r}
+#| label: fig-tukey
+#| fig-cap: "Tukey 95% family-wise confidence intervals for the pairwise differences"
+#| fig-alt: !expr local({tk <- TukeyHSD(anova_model)$bmi_category; f <- function(r) sprintf("%.1f mmHg (%.1f to %.1f)", tk[r, "diff"], tk[r, "lwr"], tk[r, "upr"]); paste0("Tukey confidence-interval plot for three pairwise differences in mean systolic pressure, none crossing zero. Overweight minus normal ", f("Overweight-Normal"), ", obese minus normal ", f("Obese-Normal"), ", and obese minus overweight ", f("Obese-Overweight"), ".")})
+# Conduct Tukey HSD test
+tukey_results <- TukeyHSD(anova_model)
+print(tukey_results)
+
+# Visualize the confidence intervals
+plot(tukey_results, las = 0)
+
+# Look up each comparison by name for the table below
+tk <- as.data.frame(tukey_results$bmi_category)
+tk_row <- function(cmp) tk[cmp, ]
+```
+
+**Interpretation:**
+
+| Comparison | Mean Diff | 95% CI | p-value | Significant? |
+|------------|-----------|--------|---------|--------------|
+| Overweight - Normal | `r round(tk_row("Overweight-Normal")$diff, 2)` | [`r round(tk_row("Overweight-Normal")$lwr, 2)`, `r round(tk_row("Overweight-Normal")$upr, 2)`] | `r format.pval(tk_row("Overweight-Normal")$"p adj", digits = 3, eps = 0.001)` | `r ifelse(tk_row("Overweight-Normal")$"p adj" < 0.05, "Yes", "No")` |
+| Obese - Normal | `r round(tk_row("Obese-Normal")$diff, 2)` | [`r round(tk_row("Obese-Normal")$lwr, 2)`, `r round(tk_row("Obese-Normal")$upr, 2)`] | `r format.pval(tk_row("Obese-Normal")$"p adj", digits = 3, eps = 0.001)` | `r ifelse(tk_row("Obese-Normal")$"p adj" < 0.05, "Yes", "No")` |
+| Obese - Overweight | `r round(tk_row("Obese-Overweight")$diff, 2)` | [`r round(tk_row("Obese-Overweight")$lwr, 2)`, `r round(tk_row("Obese-Overweight")$upr, 2)`] | `r format.pval(tk_row("Obese-Overweight")$"p adj", digits = 3, eps = 0.001)` | `r ifelse(tk_row("Obese-Overweight")$"p adj" < 0.05, "Yes", "No")` |
+
+**Conclusion:** `r sum(tk$"p adj" < 0.05)` of the 3 pairwise comparisons are statistically significant. `r if (all(tk$"p adj" < 0.05) && all(tk$diff > 0)) "Obese adults have higher SBP than overweight adults, who in turn have higher SBP than normal-weight adults." else "Read the table to see which pairs differ."`
+
+#### Step 7: Calculate Effect Size
+
+```{r}
+#| label: example-effect-size
+# Extract sum of squares from ANOVA table
+anova_summary <- summary(anova_model)[[1]]
+
+ss_treatment <- anova_summary$`Sum Sq`[1]
+ss_total <- sum(anova_summary$`Sum Sq`)
+
+# Calculate eta-squared
+eta_squared <- ss_treatment / ss_total
+
+cat("Eta-squared (η²):", round(eta_squared, 4), "\n")
+cat("Percentage of variance explained:", round(eta_squared * 100, 2), "%")
+```
+
+**Interpretation:** BMI category explains `r round(eta_squared * 100, 2)`% of the variance in systolic BP. 
+
+- **Effect size guidelines:** Small (0.01), Medium (0.06), Large (0.14)
+- **Our effect:** `r ifelse(eta_squared < 0.06, "Small", ifelse(eta_squared < 0.14, "Medium", "Large"))`
+
+`r if (p_f < 0.05) "While statistically significant, the practical effect is modest:" else "The effect is small:"` BMI category alone explains only `r round(eta_squared * 100, 1)`% of the variation in blood pressure.
+
+#### Step 8: Check Assumptions
+
+**ANOVA Assumptions:**
+
+1. **Independence:** Observations are independent (this comes from the study design, not from a plot). In the `NHANES` teaching package some participants appear more than once because the data were resampled, so independence does not strictly hold here.
+2. **Normality:** Residuals are approximately normally distributed
+3. **Homogeneity of variance:** Equal variances across groups
+
+```{r}
+#| label: fig-anova-diagnostics
+#| fig-cap: "Diagnostic plots for the BMI-category ANOVA"
+#| fig-alt: !expr sprintf("Four diagnostic panels for the BMI-category ANOVA. Residuals versus fitted and scale-location show three vertical strips at the group means of about %.0f, %.0f, and %.0f mmHg with flat trend lines. The Q-Q plot curves above the line in the upper tail, showing right skew; some labeled extreme points come in identical pairs because the NHANES package repeats some people. Residuals versus leverage shows strips with tiny leverage and no point near a Cook's distance contour.", summary_stats$Mean[1], summary_stats$Mean[2], summary_stats$Mean[3])
+#| fig-height: 7
+# Create diagnostic plots
+par(mfrow = c(2, 2))
+plot(anova_model)
+par(mfrow = c(1, 1))
+```
+
+```{r}
+#| label: example-levene-early
+#| include: false
+levene_test <- leveneTest(BPSysAve ~ bmi_category, data = bp_bmi_data)
+```
+
+**Diagnostic Plot Interpretation:**
+
+##### 1. Residuals vs Fitted: Checking the Group Means
+
+This plot checks if the relationship between our groups and blood pressure is captured correctly.
+
+**The Pattern:** You see three distinct vertical "columns" of points. Each column represents one of our groups (Normal, Overweight, and Obese). In ANOVA, every person in a group has the same "fitted value" (the group mean).
+
+**The Conclusion:** The red line is relatively flat and stays near zero. This is a good sign: the residuals in each group are centered on that group's mean.
+
+##### 2. Normal Q-Q: Checking for Normality
+
+This is the most important plot for this specific dataset. It checks if our residuals (the differences between observed and predicted BP) follow a normal distribution.
+
+**The Pattern:** The points should follow the dashed diagonal line. Here, we see the points curving upward away from the line at the top right.
+
+**The Conclusion:** This indicates right-skewness. This is common in public health data, where "high BP outliers" stretch the distribution. However, because our sample is very large (N = `r format(nrow(bp_bmi_data), big.mark = ",")`), the Central Limit Theorem tells us that ANOVA is robust to this violation.
+
+##### 3. Scale-Location: Checking for Equal Variance (Homoscedasticity)
+
+This plot checks if the "spread" of blood pressure is roughly the same within each BMI category.
+
+**The Pattern:** We want to see a flat red line and columns of points that are roughly the same height.
+
+**The Conclusion:** Compare the heights of the three columns. Levene's test below gives `r fmt_p(levene_test$"Pr(>F)"[1])`, so it `r ifelse(levene_test$"Pr(>F)"[1] < 0.05, "rejects", "does not reject")` equal variances`r ifelse(levene_test$"Pr(>F)"[1] < 0.1 & levene_test$"Pr(>F)"[1] >= 0.05, ", though only just", "")`.
+
+##### 4. Residuals vs Leverage: Identifying Influential Outliers
+
+This plot helps us see if any single data point (one person's BP) is so extreme that it is pulling the group mean and "faking" our results.
+
+**The Pattern:** We look for points in the corners that cross the dashed contour lines labeled "Cook's distance." Here every point has very low leverage, so the contours fall outside the plotted area and only the legend entry shows.
+
+**The Conclusion:** R labels the three most extreme points with their row numbers. The largest Cook's distance is `r signif(max(cooks.distance(anova_model)), 2)`, `r ifelse(max(cooks.distance(anova_model)) < 0.5, "far below the 0.5 contour, so no single person is driving our results", "large enough to look at that observation")`.
+
+##### Summary of Assumption Checks
+
+```{r}
+#| label: assumption-summary-table
+#| echo: false
+assumption_summary <- data.frame(
+  Plot = c("Residuals vs Fitted", 
+           "Normal Q-Q", 
+           "Scale-Location", 
+           "Residuals vs Leverage"),
+  Assumption = c("Residuals centered on group means",
+                 "Normality",
+                 "Equal Variance",
+                 "No Influential Outliers"),
+  Status = c("Met",
+             "Minor violation (right skew)",
+             ifelse(levene_test$"Pr(>F)"[1] < 0.05, "Not met (Levene p < 0.05)", "Met (Levene p >= 0.05)"),
+             ifelse(max(cooks.distance(anova_model)) < 0.5, "Met", "Check")),
+  Interpretation = c(
+    "The red line is flat. The vertical 'strips' represent our three BMI groups.",
+    paste0("Residuals are right-skewed. With N = ", format(nrow(bp_bmi_data), big.mark = ","), ", ANOVA is robust to this."),
+    "Compare the spread of the three columns; Levene's test gives the formal answer.",
+    paste0("The largest Cook's distance is ", signif(max(cooks.distance(anova_model)), 2), "; no single person is warping the means.")
+  )
+)
+
+kable(assumption_summary, 
+      caption = "ANOVA Assumption Check Summary",
+      col.names = c("Plot", "Assumption", "Status", "Interpretation for this example"))
+```
+
+##### Final Takeaway
+
+While the Normal Q-Q plot shows that the residuals are somewhat skewed, our large sample size and the other three plots mean the F-test and the Tukey comparisons above can be trusted. In practice, check the assumptions *before* you interpret the F-test and the post-hoc tests.
+
+```{r}
+#| label: example-levene
+# Levene's test for homogeneity of variance
+levene_test <- leveneTest(BPSysAve ~ bmi_category, data = bp_bmi_data)
+print(levene_test)
+```
+
+**Levene's Test Interpretation:**
+
+- **p-value:** `r format.pval(levene_test$"Pr(>F)"[1], digits=3)`
+- If p < 0.05, we would reject equal variances
+- **Here:** `r ifelse(levene_test$"Pr(>F)"[1] < 0.05, "Variances differ significantly, but with large n, ANOVA is robust", "Equal variance assumption is met")`
+
+**Overall Assessment:** With n = `r format(nrow(bp_bmi_data), big.mark = ",")`, ANOVA is robust to minor violations. Our assumptions are reasonably satisfied.
+
+#### Step 9: Report Results
+
+**Example Results Section:**
+
+We conducted a one-way ANOVA to examine whether mean systolic blood pressure (SBP) differs across BMI categories (Normal, Overweight, Obese) among `r format(nrow(bp_bmi_data), big.mark=",")` adults aged 18-65 from NHANES. Descriptive statistics showed mean SBP of `r round(summary_stats$Mean[1], 1)` mmHg (SD = `r round(summary_stats$SD[1], 1)`) for normal weight, `r round(summary_stats$Mean[2], 1)` mmHg (SD = `r round(summary_stats$SD[2], 1)`) for overweight, and `r round(summary_stats$Mean[3], 1)` mmHg (SD = `r round(summary_stats$SD[3], 1)`) for obese individuals.
+
+The ANOVA `r ifelse(p_f < 0.05, "revealed a statistically significant difference", "did not reveal a statistically significant difference")` in mean SBP across BMI categories, F(2, `r df_error`) = `r round(f_value, 2)`, `r fmt_p(p_f)`. Tukey's HSD post-hoc tests found `r sum(tk$"p adj" < 0.05)` of 3 pairwise comparisons significant (p < 0.05): obese adults had on average `r round(tk_row("Obese-Normal")$diff, 1)` mmHg higher SBP than normal-weight adults, and `r round(tk_row("Obese-Overweight")$diff, 1)` mmHg higher than overweight adults.
+
+The effect size (η² = `r round(eta_squared, 3)`) indicates that BMI category explains `r round(eta_squared * 100, 1)`% of the variance in systolic blood pressure, representing a `r ifelse(eta_squared < 0.06, "small", ifelse(eta_squared < 0.14, "medium", "large"))` practical effect. These findings support the well-established relationship between higher BMI and elevated blood pressure, though other factors account for most of the variation in SBP.
+
+## PART B: YOUR TURN - INDEPENDENT PRACTICE
+
+### Practice Problem: Physical Activity and Poor Mental Health Days
+
+##### **Research Question:** Is there a difference in the number of days with poor mental health in the past 30 days (`DaysMentHlthBad`) across three physical activity levels: none, active 1-2 days a week, and active 3 or more days a week?
+
+We use the 2009-2010 NHANES cycle, where the number of active days was asked of exactly the people who said they were active.
+
+**Your Task:** Complete the same 9-step analysis workflow you just practiced, but now on a different outcome and predictor.
+
+#### Step 1: Data Preparation
+
+```{r}
+#| label: practice-data-prep
+# Prepare the dataset
+set.seed(553)
+
+# 2009-2010 only: in that cycle active days were asked of exactly the active
+mental_health_data <- NHANES |>
+  filter(SurveyYr == "2009_10") |>
+  filter(Age >= 18) |>
+  filter(!is.na(DaysMentHlthBad) & !is.na(PhysActive)) |>
+  mutate(
+    # Groups by days of moderate or vigorous activity in a typical week
+    activity_level = case_when(
+      PhysActive == "No" ~ "None",
+      PhysActive == "Yes" & !is.na(PhysActiveDays) & PhysActiveDays < 3 ~ "1-2 days",
+      PhysActive == "Yes" & !is.na(PhysActiveDays) & PhysActiveDays >= 3 ~ "3+ days",
+      TRUE ~ NA_character_
+    ),
+    activity_level = factor(activity_level,
+                           levels = c("None", "1-2 days", "3+ days"))
+  ) |>
+  filter(!is.na(activity_level)) |>
+  select(ID, Age, Gender, DaysMentHlthBad, PhysActive, activity_level)
+
+# YOUR TURN: Display the first 6 rows and check sample sizes
+
+```
+
+**YOUR TURN - Answer these questions:**
+
+- How many people are in each physical activity group?
+  - None:
+  - 1-2 days:
+  - 3+ days: 
+
+#### Step 2: Descriptive Statistics
+
+```{r}
+#| label: practice-descriptives
+# YOUR TURN: Calculate summary statistics by activity level
+# Hint: Follow the same structure as the guided example
+# Variables to summarize: n, Mean, SD, Median, Min, Max
+
+```
+
+**YOUR TURN - Interpret:**
+
+- Which group has the highest mean number of bad mental health days?
+- Which group has the lowest?
+
+#### Step 3: Visualization
+
+```{r}
+#| label: practice-visualization
+# YOUR TURN: Create boxplots comparing DaysMentHlthBad across activity levels
+# Hint: Use the same ggplot code structure as the example
+# Change variable names and labels appropriately
+
+```
+
+**YOUR TURN - Describe what you see:**
+
+- Do the groups appear to differ?
+- Are the variances similar across groups?
+
+#### Step 4: Set Up Hypotheses
+
+**YOUR TURN - Write the hypotheses:**
+
+**Null Hypothesis (H₀):** 
+
+**Alternative Hypothesis (H₁):** 
+
+**Significance level:** α = 
+
+#### Step 5: Fit the ANOVA Model
+
+```{r}
+#| label: practice-anova
+# YOUR TURN: Fit the ANOVA model
+# Outcome: DaysMentHlthBad
+# Predictor: activity_level
+
+```
+
+**YOUR TURN - Extract and interpret the results:**
+
+- F-statistic: 
+- Degrees of freedom: 
+- p-value: 
+- Decision (reject or fail to reject H₀): 
+- Statistical conclusion in words:
+
+#### Step 6: Post-Hoc Tests
+
+```{r}
+#| label: practice-tukey
+# YOUR TURN: Conduct Tukey HSD test
+# Only if your ANOVA p-value < 0.05
+
+```
+
+**YOUR TURN - Complete the table:**
+
+| Comparison | Mean Difference | 95% CI Lower | 95% CI Upper | p-value | Significant? |
+|------------|-----------------|--------------|--------------|---------|--------------|
+| 1-2 days - None |  |  |  |  |  |
+| 3+ days - None |  |  |  |  |  |
+| 3+ days - 1-2 days |  |  |  |  |  |
+
+**Interpretation:**
+
+Which specific groups differ significantly?
+
+#### Step 7: Calculate Effect Size
+
+```{r}
+#| label: practice-effect-size
+# YOUR TURN: Calculate eta-squared
+# Hint: Extract Sum Sq from the ANOVA summary
+
+```
+
+**YOUR TURN - Interpret:**
+
+- η² = 
+- Percentage of variance explained: 
+- Effect size classification (small/medium/large): 
+- What does this mean practically?
+
+#### Step 8: Check Assumptions
+
+```{r}
+#| label: practice-diagnostics
+# YOUR TURN: Create diagnostic plots
+
+```
+
+**YOUR TURN - Evaluate each plot:**
+
+1. **Residuals vs Fitted:** 
+
+2. **Q-Q Plot:** 
+
+3. **Scale-Location:** 
+
+4. **Residuals vs Leverage:** 
+
+```{r}
+#| label: practice-levene
+# YOUR TURN: Conduct Levene's test
+
+```
+
+**YOUR TURN - Overall assessment:**
+
+- Are assumptions reasonably met?
+- Do any violations threaten your conclusions?
+
+#### Step 9: Write Up Results
+
+**YOUR TURN - Write a complete 2-3 paragraph results section:**
+
+Include:
+
+1. Sample description and descriptive statistics
+2. F-test results
+3. Post-hoc comparisons (if applicable)
+4. Effect size interpretation
+5. Public health significance
+
+**Your Results Section:**
+
+<!-- Write here -->
+
+### Reflection Questions
+
+**1. How does the effect size help you understand the practical vs. statistical significance?**
+
+<!-- Your answer -->
+
+**2. Why is it important to check ANOVA assumptions? What might happen if they're violated?**
+
+<!-- Your answer -->
+
+**3. In public health practice, when might you choose to use ANOVA?**
+
+<!-- Your answer -->
+
+**4. What was the most challenging part of this lab activity?**
+
+<!-- Your answer -->
+
+### Submission Checklist
+
+Before submitting, verify you have:
+
+- [ ] Completed all code chunks in Part B
+- [ ] Filled in all interpretation questions
+- [ ] Completed the Tukey HSD comparison table
+- [ ] Written a complete results section
+- [ ] Answered all reflection questions
+- [ ] Rendered your `.qmd` (or `.Rmd`) file to HTML without errors
+- [ ] Checked that all outputs display correctly
+
+**To submit:** Upload both your `.qmd` (or `.Rmd`) file and the HTML output to Brightspace.
+
+**Next:** [Matrix Algebra for Regression](../lectures/matrix-algebra.qmd).

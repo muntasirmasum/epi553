@@ -1,0 +1,674 @@
+---
+title: "Analysis of Variance (ANOVA)"
+subtitle: "Compare the means of three or more groups with one test, then find which groups differ."
+description: "The F-test, the ANOVA table, effect size (η²), assumption checks, and Tukey post-hoc comparisons, using bone mineral density by physical activity."
+order: 2
+unit: "Foundations"
+categories: [Foundations]
+---
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture, you will be able to:
+
+- Understand the purpose and application of ANOVA
+- Decompose total variance into treatment and error components
+- Interpret ANOVA tables and F-test results
+- Conduct post-hoc comparisons using Tukey-Kramer method
+- Apply ANOVA to real public health data using R
+- Translate research questions into testable hypotheses for multiple group comparisons
+:::
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(knitr)
+library(NHANES)
+library(car)
+```
+
+## Why/When/Watch-out: ANOVA at a Glance
+
+::: {.callout-note}
+## Why use ANOVA?
+
+ANOVA addresses the **multiple comparisons problem**. When comparing 3+ groups:
+
+- Multiple t-tests inflate Type I error (false positives)
+- With 3 groups → 3 comparisons → 14.3% false positive rate (not 5%!)
+- ANOVA conducts a **single omnibus test** controlling error at α = 0.05
+
+**Real-world value:** You can confidently compare multiple treatments, exposure levels, or populations without inflating your chance of false discoveries.
+:::
+
+::: {.callout-tip}
+## When to use ANOVA
+
+- **Comparing 3 or more group means** (e.g., 3 medications, 5 counties, 4 pollution levels)
+- **One categorical predictor** (treatment type, exposure category, region)
+- **Continuous outcome** (blood pressure, BMD, vaccination rate)
+- **Independent observations** within each group
+
+**If you only have 2 groups:** Use an independent samples t-test instead
+:::
+
+::: {.callout-warning}
+## Watch out: common pitfalls
+
+**Assumption violations matter with small, unbalanced samples**
+
+- Check normality, equal variances, independence
+- ANOVA is robust with n > 30 per group and similar group sizes
+
+**Don't skip post-hoc tests**
+
+- A significant F-test only tells you "at least one mean differs"
+- Use Tukey HSD to identify *which specific pairs* differ
+
+**Effect size matters**
+
+- p < 0.05 doesn't mean practically important
+- Always report η² (eta-squared): How much variance does the factor explain?
+- Guidelines: η² = 0.01 (small), 0.06 (medium), 0.14 (large)
+
+**ANOVA only tests for differences, not relationships**
+
+- If your predictor is ordinal (low/medium/high), ANOVA doesn't test for a linear trend
+- Consider regression with dummy variables for more nuanced analysis
+:::
+
+## Why ANOVA Matters: Real-World Applications
+
+ANOVA is one of the most powerful tools in your biostatistics toolkit. Here's why you'll use it throughout your public health career:
+
+**Example 1: Medication Effectiveness**
+
+- **Question:** Does blood pressure reduction differ across three different medications?
+- **ANOVA Solution:** Compare mean BP reduction across treatment groups
+
+**Example 2: Environmental Health**
+
+- **Question:** How does respiratory hospital admission rate vary by air pollution level (low/moderate/high)?
+- **ANOVA Solution:** Test for differences in mean admission rates across pollution categories
+
+**Example 3: Population Health**
+
+- **Question:** Does COVID-19 vaccination rate differ across multiple counties?
+- **ANOVA Solution:** Compare vaccination rates across geographic units
+
+**Example 4: Occupational Health**
+
+- **Question:** Do lung function outcomes differ across different occupational exposure groups?
+- **ANOVA Solution:** Test for differences in forced expiratory volume across exposure categories
+
+## The Problem ANOVA Solves
+
+### The Multiple Comparisons Problem
+
+Suppose you want to compare **three or more group means**. Your first instinct might be: "Why not just do multiple t-tests?"
+
+**The danger of multiple testing:**
+
+If you conduct independent t-tests for each pair of groups:
+
+- With k groups, you need $\binom{k}{2}$ pairwise tests (pronounced "k choose 2")
+- Each test has a Type I error rate of α = 0.05
+- **The experiment-wise error rate inflates dramatically**
+
+**Example with 3 groups (3 comparisons):**
+
+The experiment-wise error rate equals 1 minus (1 minus 0.05) raised to the power of 3, which equals 1 minus 0.857, which equals 0.143.
+
+$$\text{Experiment-wise error rate} = 1 - (1-0.05)^3 = 1 - 0.857 = 0.143$$
+
+Your true probability of making **at least one false positive is 14.3%**, not 5%!
+
+### ANOVA's Solution
+
+- Conducts a **single omnibus test** of all means simultaneously
+- Controls the experiment-wise Type I error rate at α
+- If significant, use **post-hoc tests** (like Tukey-Kramer) to identify which pairs differ
+
+## ANOVA Fundamentals
+
+### Hypotheses
+
+**Null hypothesis (H₀):** All group means are equal (μ₁ = μ₂ = ... = μₖ)
+
+$$H_0: \mu_1 = \mu_2 = \cdots = \mu_k$$
+
+**Alternative hypothesis (H₁):** At least one group mean is different from the others
+
+$$H_1: \text{At least one mean is different}$$
+
+### Key Terminology
+
+| Term | Definition |
+|------|-----------|
+| **Factor** | The categorical independent variable (e.g., treatment type) |
+| **Levels** | The number of groups in the factor (e.g., 3 medications = 3 levels) |
+| **One-way ANOVA** | One factor with multiple levels (our focus) |
+| **Two-way ANOVA** | Two factors (beyond this course scope) |
+
+*Table 1: Key terminology used in ANOVA analysis*
+
+## The Math: Decomposing Variance
+
+ANOVA works by partitioning total variation into two components:
+
+### Total Sum of Squares (SSY)
+
+The total deviation of all observations from the grand mean. This represents the overall variability in the outcome across all groups.
+
+$$SS_Y = \sum_{i=1}^{k} \sum_{j=1}^{n_i} (y_{ij} - \overline{y})^2$$
+
+**Where:**
+
+- $y_{ij}$ = observation j in group i
+- $\overline{y}$ = grand mean (the average across all observations and groups)
+
+### Key Identity: Decomposition
+
+Total variation equals the sum of between-group and within-group variation:
+
+$$SS_Y = SS_T + SS_E$$
+
+**Treatment Sum of Squares (SST)** - Variation **between** groups:
+$$SS_T = \sum_{i=1}^{k} n_i(\overline{y}_{i} - \overline{y})^2$$
+
+This represents how much each group's mean differs from the overall grand mean, weighted by group size.
+
+**Error Sum of Squares (SSE)** - Variation **within** groups:
+$$SS_E = \sum_{i=1}^{k} \sum_{j=1}^{n_i} (y_{ij} - \overline{y}_{i})^2$$
+
+This represents the variability of individual observations around their own group mean. This is the "leftover" or unexplained variation.
+
+### Mean Squares
+
+Divide by degrees of freedom to get **mean squares**, which account for the number of parameters estimated:
+
+$$MS_T = \frac{SS_T}{k-1}$$
+
+$$MS_E = \frac{SS_E}{n-k}$$
+
+**Note:** Degrees of freedom for treatment equals the number of groups minus 1 (k-1). Degrees of freedom for error equals the total sample size minus the number of groups (n-k).
+
+## The F-Statistic
+
+The test statistic for ANOVA is the F-ratio:
+
+$$F = \frac{MS_T}{MS_E}$$
+
+### Interpretation
+
+- **Numerator (MST):** Average variation *between* groups. This captures the treatment effect or group differences.
+- **Denominator (MSE):** Average variation *within* groups. This captures random error and noise.
+- **Large F:** Groups differ more than we'd expect by chance alone (suggests a real treatment effect)
+- **Small F:** Differences between groups are small relative to within-group variation (suggests no treatment effect)
+
+### Decision Rule
+
+Reject the null hypothesis if F exceeds the critical value $F_{k-1, n-k, 1-\alpha}$ at significance level α (typically 0.05).
+
+In practice, we compare the p-value to α: reject $H_0$ if p-value < α.
+
+## ANOVA Assumptions
+
+::: {.callout-important}
+## Critical assumptions checklist
+
+ANOVA requires three key assumptions. Meeting these assumptions ensures the validity of your p-values and inference.
+:::
+
+### 1. Independence
+
+Observations are independent. Each observation should not influence another. This assumption is violated in repeated measures designs, clustered data, or time series data.
+
+**Watch out:** Correlated data (family members, repeated measurements, geographic clustering) violates independence and requires specialized methods.
+
+### 2. Normality
+
+Within each group, the outcome is approximately normally distributed. The distribution should resemble a bell curve.
+
+**How to check:** 
+
+- Visual: Q-Q plots for each group
+- Statistical: Shapiro-Wilk test (but sensitive with large n)
+
+**Watch out:** Heavy skew or extreme outliers can distort results
+
+### 3. Homogeneity of Variance
+
+All groups have equal population variances. Mathematically, this means: $\sigma_1^2 = \sigma_2^2 = \cdots = \sigma_k^2$
+
+In other words, the spread of values around each group's mean should be roughly the same across all groups.
+
+**How to check:**
+
+- Visual: Boxplots or residual plots
+- Statistical: Levene's test
+
+**Watch out:** If one group's variance is >3x another group's variance, consider transformations or use Welch's ANOVA
+
+### Robustness
+
+**Good news:** ANOVA is **robust** to moderate violations of these assumptions, particularly:
+
+- With larger sample sizes (typically n > 30 per group)
+- With balanced designs (similar group sizes)
+- Against non-normality if distributions are similar across groups
+
+**Bad news:** 
+
+- With very small, unbalanced samples, violations matter more
+- Outliers can have large effects on F-test validity
+
+## Worked Example: Physical Activity and Bone Mineral Density
+
+### Research Question
+
+**Does bone mineral density (BMD) differ across physical activity levels in older adults?**
+
+This example uses adults aged 50 and older from the `NHANES` R package, which holds National Health and Nutrition Examination Survey data from the 2009-2010 and 2011-2012 cycles. We use the **2009-2010 cycle only**: in that cycle the number of active days (`PhysActiveDays`) was asked of exactly the people who said they were active, while in 2011-2012 the two questions do not line up (some "not active" people report active days and many active people have no day count). Physical activity comes from what participants reported:
+
+- **Low:** not physically active (`PhysActive` is "No")
+- **Moderate:** moderate or vigorous activity on 1 to 4 days in a typical week
+- **High:** moderate or vigorous activity on 5 or more days a week (`PhysActiveDays`)
+
+The NHANES package does not include bone density, so **bone mineral density (BMD) is simulated** from each person's age and activity group. The analysis steps are real; the BMD values are for practice only.
+
+**Why this matters:** Understanding the relationship between physical activity and bone health can inform public health recommendations for preventing osteoporosis and fractures in aging populations.
+
+### Data Preparation
+
+```{r}
+#| label: data-load
+data(NHANES)
+
+# The NHANES package has no bone density measurement, so BMD is simulated
+# below from age and activity group.
+set.seed(553)  # For reproducibility
+
+bmd_data <- NHANES |>
+  filter(SurveyYr == "2009_10") |>  # activity days asked of exactly the active
+  filter(Age >= 50) |>
+  filter(!is.na(PhysActive)) |>
+  # Activity groups from reported activity: not active; active 1-4 days
+  # a week; active 5 or more days a week
+  mutate(
+    activity_group = case_when(
+      PhysActive == "No" ~ "Low",
+      PhysActive == "Yes" & PhysActiveDays %in% 1:4 ~ "Moderate",
+      PhysActive == "Yes" & PhysActiveDays >= 5 ~ "High",
+      TRUE ~ NA_character_
+    ),
+    activity_group = factor(activity_group, levels = c("Low", "Moderate", "High"))
+  ) |>
+  filter(!is.na(activity_group)) |>
+  # Simulate realistic BMD data based on activity level and age
+  # Mean BMD decreases with age, increases with activity
+  mutate(
+    BMD = case_when(
+      activity_group == "Low" ~ rnorm(n(), mean = 0.90 - (Age - 50) * 0.002, sd = 0.12),
+      activity_group == "Moderate" ~ rnorm(n(), mean = 0.93 - (Age - 50) * 0.002, sd = 0.12),
+      activity_group == "High" ~ rnorm(n(), mean = 0.95 - (Age - 50) * 0.002, sd = 0.12)
+    ),
+    # Ensure realistic bounds (BMD typically 0.6-1.2 g/cm²)
+    BMD = pmax(0.6, pmin(1.2, BMD))
+  ) |>
+  select(ID, Age, Gender, BMD, PhysActive, PhysActiveDays, activity_group)
+
+# Display first few rows
+head(bmd_data) |> kable(caption = "First 6 rows of BMD dataset")
+
+cat("Sample size:", nrow(bmd_data), "adults aged 50+ (BMD simulated)\n")
+```
+
+### Descriptive Statistics
+
+```{r}
+#| label: descriptives
+# Summary statistics by group
+summary_stats <- bmd_data |>
+  group_by(activity_group) |>
+  summarise(
+    n = n(),
+    Mean = mean(BMD, na.rm = TRUE),
+    SD = sd(BMD, na.rm = TRUE),
+    Median = median(BMD, na.rm = TRUE),
+    Min = min(BMD, na.rm = TRUE),
+    Max = max(BMD, na.rm = TRUE)
+  )
+
+summary_stats |> 
+  kable(digits = 3, 
+        caption = "Descriptive statistics for BMD by physical activity level")
+```
+
+### Visual Exploration
+
+```{r}
+#| label: fig-boxplot
+#| fig-alt: !expr sprintf("Box plots with jittered points of simulated bone mineral density for three activity groups of adults 50 and older. Medians are about %.2f g/cm² in the low group (n = %d, the largest), %.2f in the moderate group (n = %d), and %.2f in the high group (n = %d). The boxes overlap heavily and the values span %.1f to %.1f g/cm².", summary_stats$Median[1], summary_stats$n[1], summary_stats$Median[2], summary_stats$n[2], summary_stats$Median[3], summary_stats$n[3], min(bmd_data$BMD), max(bmd_data$BMD))
+#| fig-cap: Boxplots of bone mineral density by physical activity level. The boxes show
+#|   the interquartile range (IQR), horizontal lines show medians, small
+#|   semi-transparent points show each participant, and larger solid points mark
+#|   any values beyond 1.5 × IQR.
+ggplot(bmd_data, aes(x = activity_group, y = BMD, fill = activity_group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.3, size = 0.5) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Bone Mineral Density by Physical Activity Level",
+    subtitle = "NHANES 2009-2010, adults aged 50+ (BMD simulated)",
+    x = "Physical Activity Level",
+    y = "Bone Mineral Density (g/cm²)",
+    fill = "Activity Level"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+**Initial observations:**
+
+- The median BMD is highest in the `r as.character(summary_stats$activity_group[which.max(summary_stats$Median)])` activity group and lowest in the `r as.character(summary_stats$activity_group[which.min(summary_stats$Median)])` group
+- Variability (IQR width) looks similar across groups
+- The groups differ in size: `r paste0(summary_stats$activity_group, " (n = ", format(summary_stats$n, big.mark = ","), ")", collapse = ", ")`
+- `r n_out <- sapply(split(bmd_data$BMD, bmd_data$activity_group), function(x) { q <- quantile(x, c(0.25, 0.75)); sum(x < q[1] - 1.5 * IQR(x) | x > q[2] + 1.5 * IQR(x)) }); if (sum(n_out) == 0) "No group has values beyond 1.5 × IQR, so the boxplots show no outlier points" else paste0("Values beyond 1.5 × IQR (larger solid points): ", paste(names(n_out), n_out, collapse = ", "))`
+
+## Fitting the ANOVA Model
+
+### Hypotheses
+
+**Null hypothesis (H₀):** Mean BMD is equal across all three activity groups
+
+$$H_0: \mu_{Low} = \mu_{Moderate} = \mu_{High}$$
+
+**Alternative hypothesis (H₁):** At least one group's mean BMD differs from the others
+
+### Fit the Model
+
+```{r}
+#| label: fit-anova
+# Fit one-way ANOVA
+anova_model <- aov(BMD ~ activity_group, data = bmd_data)
+
+# Display ANOVA table
+anova_table <- summary(anova_model)
+print(anova_table)
+
+# Create a formatted ANOVA table
+anova_df <- data.frame(
+  Source = c("Activity Group", "Residuals"),
+  DF = c(anova_table[[1]]$Df[1], anova_table[[1]]$Df[2]),
+  `Sum Sq` = c(anova_table[[1]]$`Sum Sq`[1], anova_table[[1]]$`Sum Sq`[2]),
+  `Mean Sq` = c(anova_table[[1]]$`Mean Sq`[1], anova_table[[1]]$`Mean Sq`[2]),
+  `F value` = c(anova_table[[1]]$`F value`[1], NA),
+  `Pr(>F)` = c(format.pval(anova_table[[1]]$`Pr(>F)`[1], digits = 3, eps = 0.001), NA)
+)
+
+kable(anova_df, digits = 4,
+      caption = "ANOVA table for BMD by physical activity level",
+      col.names = c("Source", "DF", "Sum Sq", "Mean Sq", "F value", "p-value"))
+
+f_value <- anova_table[[1]]$`F value`[1]
+p_f <- anova_table[[1]]$`Pr(>F)`[1]
+df_error <- anova_table[[1]]$Df[2]
+```
+
+### Interpretation
+
+**F-statistic:** `r round(f_value, 2)`
+
+**p-value:** `r format.pval(p_f, digits = 3)`
+
+**Conclusion:** `r if (p_f < 0.05) "Since p < 0.05, we reject the null hypothesis. There is statistically significant evidence that mean BMD differs across at least one pair of physical activity groups." else "Since p >= 0.05, we fail to reject the null hypothesis. There is not statistically significant evidence that mean BMD differs across the activity groups."`
+
+**But which groups differ?** The F-test doesn't tell us which specific pairs are different. For that, we need post-hoc tests.
+
+## Post-Hoc Comparisons: Tukey HSD
+
+When ANOVA is significant (p < 0.05), we conduct **post-hoc tests** to identify which specific pairs of groups differ.
+
+**Why Tukey-Kramer?**
+
+- Controls family-wise error rate at α = 0.05 across ALL pairwise comparisons
+- More powerful than Bonferroni correction
+- Provides confidence intervals for mean differences
+
+```{r}
+#| label: tukey
+# Conduct Tukey HSD test
+tukey_results <- TukeyHSD(anova_model)
+print(tukey_results)
+
+# Extract and format results
+tukey_summary <- as.data.frame(tukey_results$activity_group)
+tukey_summary$Comparison <- rownames(tukey_summary)
+tukey_summary <- tukey_summary[, c("Comparison", "diff", "lwr", "upr", "p adj")]
+
+# Add interpretation columns
+tukey_summary$Significant <- ifelse(tukey_summary$`p adj` < 0.05, "Yes", "No")
+tukey_summary$Direction <- ifelse(
+  tukey_summary$Significant == "Yes",
+  ifelse(tukey_summary$diff > 0, "First group higher", "Second group higher"),
+  "No difference"
+)
+
+kable(tukey_summary, digits = 4,
+      caption = "Tukey HSD post-hoc comparisons with 95% confidence intervals")
+```
+
+### Detailed Interpretation
+
+```{r}
+#| label: tukey-interpret
+# Interpret each comparison
+cat("POST-HOC TEST INTERPRETATION\n")
+cat("============================\n\n")
+
+for (i in 1:nrow(tukey_summary)) {
+  row <- tukey_summary[i, ]
+  cat("Comparison:", row$Comparison, "\n")
+  cat("  Estimated mean difference:", round(row$diff, 4), "g/cm²\n")
+  cat("  95% Confidence Interval: [", 
+      round(row$lwr, 4), ", ", round(row$upr, 4), "]\n")
+  cat("  Adjusted p-value:", format(row$`p adj`, digits = 4), "\n")
+  cat("  Statistical Significance:", row$Significant, "\n")
+  cat("  Direction:", row$Direction, "\n\n")
+}
+```
+
+```{r}
+#| label: tukey-helpers
+#| echo: false
+# Look up each comparison by name (TukeyHSD orders rows Moderate-Low,
+# High-Low, High-Moderate) and write the sentence from the numbers.
+tk <- function(cmp) tukey_summary[tukey_summary$Comparison == cmp, ]
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+describe_cmp <- function(cmp, a, b) {
+  r <- tk(cmp)
+  sig <- r$`p adj` < 0.05
+  dir <- if (r$diff > 0) "higher" else "lower"
+  paste0(
+    if (sig) paste0("People with ", a, " activity have significantly ", dir, " mean BMD than those with ", b, " activity")
+    else paste0("Mean BMD does not differ significantly between ", a, " and ", b, " activity"),
+    " (difference = ", sprintf("%+.3f", r$diff), " g/cm², 95% CI ",
+    sprintf("%.3f", r$lwr), " to ", sprintf("%.3f", r$upr), ", ", fmt_p(r$`p adj`), ")"
+  )
+}
+hm_sig <- tk("High-Moderate")$`p adj` < 0.05
+```
+
+::: {.callout-important}
+## Key findings
+
+**High vs Low activity:** `r describe_cmp("High-Low", "high", "low")`.
+
+**Moderate vs Low activity:** `r describe_cmp("Moderate-Low", "moderate", "low")`.
+
+**High vs Moderate activity:** `r describe_cmp("High-Moderate", "high", "moderate")``r if (!hm_sig) ", so in these data the extra activity days add no clear further difference" else ""`.
+:::
+
+## Effect Size: Eta-Squared
+
+**Statistical significance ≠ Practical importance**
+
+How much of the variance in BMD is explained by physical activity? We calculate eta-squared (η²), a measure of effect size.
+
+```{r}
+#| label: effect-size
+# Calculate eta-squared
+ss_treatment <- anova_table[[1]]$`Sum Sq`[1]
+ss_total <- sum(anova_table[[1]]$`Sum Sq`)
+eta_squared <- ss_treatment / ss_total
+eta_size <- if (eta_squared < 0.01) "negligible" else if (eta_squared < 0.06) "small" else if (eta_squared < 0.14) "medium" else "large"
+```
+
+We calculate eta-squared (η²) using the formula η² = SST / SSY, which represents the proportion of total variance explained by the treatment factor.
+
+Our calculated effect size is η² = `r round(eta_squared, 4)`. This means physical activity explains approximately `r round(eta_squared * 100, 2)`% of the variance in BMD.
+
+To interpret this effect size, we use conventional guidelines: η² = 0.01 (small), η² = 0.06 (medium), and η² = 0.14 (large). In our case, the effect is `r eta_size`. 
+
+`r if (p_f < 0.05) "While the F-test indicates a statistically significant difference across activity groups, the practical magnitude of this effect is modest." else "The F-test does not indicate a statistically significant difference, and the effect is small."` Other factors not included in our model, such as genetics, age, gender, calcium intake, and hormonal status, likely play substantial roles in determining bone mineral density.
+
+::: {.callout-warning}
+## Watch out: statistical vs practical significance
+
+This example shows η² = `r round(eta_squared, 3)` (about `r round(eta_squared * 100, 1)`%). By the guidelines above this is a **`r eta_size` effect**, meaning:
+
+- Physical activity explains only `r round(eta_squared * 100, 1)`% of BMD variance
+- Other unmeasured factors explain the remaining `r round(100 - eta_squared * 100, 1)`%
+- A difference can be statistically detectable and still modest in magnitude
+
+**Lesson:** Always report effect sizes alongside p-values to give readers context about practical importance.
+:::
+
+## Model Diagnostics
+
+Always check that the fitted ANOVA model meets its assumptions. We examine four diagnostic plots:
+
+```{r}
+#| label: fig-diagnostics
+#| fig-alt: !expr sprintf("Four diagnostic panels for the one-way ANOVA. Residuals versus fitted and scale-location each show three vertical strips at the group means (low %.2f, moderate %.2f, high %.2f), centered on zero with similar spread and flat trend lines. The Q-Q plot follows the reference line except for short flat runs at both ends, where simulated values were capped at 0.6 and 1.2. Residuals versus leverage shows three strips with very small leverage and no point near a Cook's distance contour.", summary_stats$Mean[1], summary_stats$Mean[2], summary_stats$Mean[3])
+#| fig-height: 7
+#| fig-cap: 'Four diagnostic plots for ANOVA model assumptions. (1) Residuals vs Fitted:
+#|   should show random scatter with no pattern. (2) Q-Q Plot: points should fall close
+#|   to the diagonal line, indicating normality. (3) Scale-Location: should be roughly
+#|   horizontal, indicating constant variance. (4) Residuals vs Leverage: look for points
+#|   outside Cook''s distance lines, indicating influential outliers.'
+# Residual diagnostics
+par(mfrow = c(2, 2))
+plot(anova_model, which = c(1, 2, 3, 5))
+par(mfrow = c(1, 1))
+```
+
+**Interpreting the diagnostic plots:**
+
+The **Residuals vs Fitted** plot (top-left) shows one vertical strip of points for each group, placed at that group's mean. Each strip should be centered on zero with a similar spread. A strip that is much wider than the others points to unequal variances. (Independence cannot be checked from this plot; it comes from how the data were collected.)
+
+The **Q-Q plot** (top-right) assesses normality by comparing quantiles of the residuals to quantiles of a standard normal distribution. Points should fall close to the diagonal line. Deviations at the tails, particularly pronounced departures, suggest departures from normality.
+
+The **Scale-Location** plot (bottom-left) tests the homogeneity of variance assumption. The red line should be roughly horizontal, and points should not form a clear upward or downward trend. A consistently rising or falling trend would suggest that variance increases or decreases across fitted values.
+
+The **Residuals vs Leverage** plot (bottom-right) identifies outliers and influential observations. Points outside the dashed Cook's distance lines are highly influential and warrant investigation, because they may disproportionately affect parameter estimates.
+
+ANOVA is robust to moderate violations of assumptions, especially when sample sizes are large and group sizes are balanced. Our groups are large (`r format(min(summary_stats$n), big.mark = ",")` to `r format(max(summary_stats$n), big.mark = ",")` people) but unequal in size, so the equal-variance check deserves attention; the formal tests below show whether it holds.
+
+### Formal Tests
+
+```{r}
+#| label: assumption-tests
+# Test normality within each group
+shapiro_p <- c()
+for (group in levels(bmd_data$activity_group)) {
+  group_data <- bmd_data |> filter(activity_group == group)
+  shapiro_test <- shapiro.test(group_data$BMD)
+  shapiro_p[group] <- shapiro_test$p.value
+  cat(group, "activity:\n")
+  cat("  W =", round(shapiro_test$statistic, 4), 
+      ", p-value =", format.pval(shapiro_test$p.value, digits = 3), "\n")
+  cat("  Interpretation:", 
+      ifelse(shapiro_test$p.value < 0.05, 
+             "Reject normality (p < 0.05)", 
+             "Do not reject normality (p >= 0.05)"), "\n\n")
+}
+
+# Test homogeneity of variance
+levene_test <- leveneTest(BMD ~ activity_group, data = bmd_data)
+print(levene_test)
+
+cat("\nInterpretation:", 
+    ifelse(levene_test$`Pr(>F)`[1] < 0.05, 
+           "Reject equal variances (p < 0.05)", 
+           "Do not reject equal variances (p >= 0.05)"), "\n")
+```
+
+To formally test our assumptions, we conduct a Shapiro-Wilk test for normality within each activity group and Levene's test for homogeneity of variance across groups. The Shapiro-Wilk test examines whether the distribution of BMD within each activity level departs significantly from normality. The null hypothesis (H₀) is that the data are normally distributed; a p-value greater than 0.05 suggests we do not have evidence against normality. Levene's test evaluates whether variance is approximately equal across the three activity groups. A non-significant result (p ≥ 0.05) indicates homogeneous variances across groups, supporting the equal variance assumption underlying ANOVA.
+
+**In our data:** Levene's test gives `r fmt_p(levene_test$"Pr(>F)"[1])`, so we `r if (levene_test$"Pr(>F)"[1] < 0.05) "reject" else "do not reject"` the assumption of equal variances. Shapiro-Wilk rejects normality in `r sum(shapiro_p < 0.05)` of the 3 groups; with groups this large the test flags even tiny departures, so the Q-Q plot above is the better guide. `r if (levene_test$"Pr(>F)"[1] < 0.05) "Because variances differ and the groups are unbalanced, Welch's ANOVA (oneway.test(BMD ~ activity_group, data = bmd_data)) is a sensible check on the F-test." else "With equal variances not rejected and large groups, the standard F-test is reasonable here."`
+
+## Writing Up Results
+
+### Statistical Results Section
+
+We conducted a one-way ANOVA to test whether bone mineral density (BMD) differed across three levels of physical activity (low, moderate, high). `r if (p_f < 0.05) "There were significant differences" else "There were no significant differences"` in mean BMD across activity groups, F(2, `r df_error`) = `r round(f_value, 2)`, `r fmt_p(p_f)`, with an effect size of η² = `r round(eta_squared, 3)`.
+
+**Interpretation:** The F-statistic of `r round(f_value, 2)` means the between-group variation (per degree of freedom) is about `r round(f_value, 0)` times the within-group variation. The p-value (`r fmt_p(p_f)`) is the probability of an F at least this large if all groups truly had the same mean.
+
+Post-hoc Tukey HSD tests compared each pair of groups. `r describe_cmp("High-Low", "high", "low")`. `r describe_cmp("Moderate-Low", "moderate", "low")`. `r describe_cmp("High-Moderate", "high", "moderate")`.
+
+The effect size was `r eta_size` (η² = `r round(eta_squared, 3)`): physical activity explains `r round(eta_squared * 100, 1)`% of the variance in BMD. Other unmeasured factors (e.g., genetics, nutrition, hormonal status) likely play larger roles in determining bone mineral density.
+
+## Key Takeaways
+
+### When to Use ANOVA
+
+- Comparing **3 or more group means**
+- Single categorical predictor (one-way ANOVA)
+- Want to control Type I error rate across multiple comparisons
+- Continuous outcome variable with approximately normal distribution
+
+### ANOVA Workflow
+
+1. **Check assumptions** (independence, normality, equal variances)
+2. **Conduct ANOVA F-test** (is there any difference among groups?)
+3. **Interpret p-value** (compare to α = 0.05)
+4. **If p < 0.05, conduct post-hoc tests** (which specific groups differ?)
+5. **Report effect sizes** (η²) and confidence intervals (not just p-values)
+6. **Check diagnostic plots** (verify assumption reasonableness)
+
+### Important Reminders
+
+- ANOVA tests whether *any* difference exists; post-hoc tests identify *which* pairs differ
+- Always control for Type I error inflation in multiple comparisons
+- Tukey-Kramer is preferred over Bonferroni for all pairwise comparisons because it maintains power
+- Report effect sizes (η²), not just p-values, to give readers a sense of practical significance
+- Check assumptions, but remember ANOVA is robust to moderate violations with large, balanced samples
+- Interpret results in context: statistically significant doesn't always mean practically meaningful
+
+### Your R Toolbox
+
+| Task | R Function |
+|------|-----------|
+| Fit ANOVA | `aov()` or `lm()` |
+| View ANOVA table | `summary(aov_model)` or `anova(lm_model)` |
+| Post-hoc test | `TukeyHSD()` |
+| Check normality | `shapiro.test()` |
+| Check equal variances | `leveneTest()` (requires car package) |
+| Model diagnostics | `plot(aov_model)` creates four diagnostic plots |
+| Effect size | Calculate η² = SST / SSY (treatment variance / total variance) |
+
+*Table 2: R functions for ANOVA analysis*
+
+## References & Further Reading
+
+- Kleinbaum, D. G., Kupper, L. L., Nizam, A., & Rosenberg, E. S. (2013). *Applied regression analysis and other multivariable methods* (5th ed.). Cengage Learning.
+
+- Wickham, H. (2016). *ggplot2: Elegant graphics for data analysis* (2nd ed.). Springer-Verlag.
+
+- R Core Team. (2023). *R: A language and environment for statistical computing.* R Foundation for Statistical Computing. https://www.R-project.org/
+
+**Next lecture:** [Matrix Algebra for Regression](matrix-algebra.qmd).

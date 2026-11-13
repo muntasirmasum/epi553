@@ -3,12 +3,15 @@ title: "Lectures"
 subtitle: "Every lecture in course order. Select a card to open the notes."
 toc: false
 page-navigation: false
+order: 0
+date-modified: ""
+body-classes: listing-page
 listing:
   id: lectures
   contents:
     - "*.qmd"
-  sort: "lecture"
+  sort: "order"
   type: default
-  template: _lecture-cards.ejs
-  fields: [title, description, lecture, unit]
+  template: ../_cards.ejs
+  fields: [title, description, order, unit, kind]
 ---
