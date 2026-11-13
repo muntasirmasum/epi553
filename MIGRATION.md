@@ -110,7 +110,7 @@ TA lab solutions (`*_Lab_Solution_TA.*`), anything in `Final Paper/` (student wo
 
 ## Other to-dos
 
-- **Your website.** Change the RPubs card on muntasirmasum.com's teaching page to a "Course sites" list linking <https://epi553.muntasirmasum.com>. Work in `Summer 2026/academic-website/design-port` (current); `~/academic-website` is behind and needs `git pull` first. The card is at `teaching.html` lines 80 to 83; `DEPLOY.md` line 15 mentions RPubs. Pushing to `main` redeploys on Vercel.
+- **Your website (after Batch 4).** The EPI 553 card on muntasirmasum.com's teaching page now leads with the course site (November 12, 2026) and keeps a secondary "Remaining lectures on RPubs" button. Once lectures 06 to 18 are published, remove that button and the paragraph's last sentence ("The course site holds the lectures moved so far; the rest are still on RPubs."). Work in `Summer 2026/academic-website/design-port`, `teaching.html` lines 79 to 84; pushing to `main` redeploys on Vercel.
 - **Brightspace.** Point the Spring 2027 course shell to the new lecture addresses.
 - **TA lab solutions.** Regenerate these from the new pages before the labs are used:
   - Simple Linear Regression: the lab now uses the lecture's 3,000 adults, and the published version's conclusion was wrong (see below).
