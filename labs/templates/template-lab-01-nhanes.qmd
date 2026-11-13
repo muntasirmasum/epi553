@@ -1,0 +1,54 @@
+---
+title: "Lab 1: Exploring Health Survey Data with NHANES"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+library(tidyverse)
+library(NHANES)
+library(knitr)
+library(kableExtra)
+
+data(NHANES)
+
+# Adults 18 and older, with the variables used in the lab
+nhanes_analysis <- NHANES |>
+  filter(Age >= 18) |>
+  select(ID, Gender, Age, Race1, Education, BMI, Pulse, BPSys1, BPDia1,
+         PhysActive, Smoke100, SmokeNow, Diabetes, HealthGen) |>
+  mutate(
+    Hypertension = factor(ifelse(BPSys1 >= 140 | BPDia1 >= 90, "Yes", "No"))
+  )
+```
+
+## Task 1: Hypertension by education
+
+How does hypertension prevalence vary by education level? Group by `Education` and calculate the sample size, mean systolic blood pressure, and the percent with hypertension.
+
+```{r}
+#| label: task1
+# Your code here
+
+```
+
+## Task 2: Visualization
+
+Make a bar chart of hypertension prevalence by education level. Remove missing education first, and label the axes.
+
+```{r}
+#| label: task2
+# Your code here
+
+```
+
+## Task 3: Interpretation
+
+In 2-3 sentences: which education groups have the highest and lowest hypertension prevalence, what might explain the differences, and why does this matter for public health?
+
+*Write your answer here.*

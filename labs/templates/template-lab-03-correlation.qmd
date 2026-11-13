@@ -1,0 +1,81 @@
+---
+title: "Lab 3: Correlation Analysis (Part B)"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+library(tidyverse)
+library(knitr)
+library(broom)
+library(corrplot)
+library(NHANES)
+
+data(NHANES)
+
+# Adults 18-80 with complete data on the lab variables
+nhanes_adult <- NHANES |>
+  filter(Age >= 18, Age <= 80) |>
+  select(Age, Weight, Height, BMI, BPSysAve, BPDiaAve,
+         Pulse, PhysActive, SleepHrsNight) |>
+  na.omit()
+```
+
+## Problem 1: Weight and height (10 points)
+
+Is there a correlation between weight and height among US adults?
+
+```{r}
+#| label: problem1
+# a. Scatterplot with a fitted line
+
+# b. Pearson correlation with cor.test(), displayed with tidy()
+
+# c. Statistical significance and conclusion
+
+# d. r-squared
+```
+
+*d. Interpret r² in 2-3 sentences here.*
+
+## Problem 2: Correlation matrix (10 points)
+
+What are the relationships among BMI, weight, and height?
+
+```{r}
+#| label: problem2
+# a. Correlation matrix for Weight, Height, BMI
+
+# b. Visualize with corrplot
+```
+
+*c. Which pair has the strongest correlation?*
+
+*d. Why does that correlation make sense biologically or mathematically?*
+
+## Problem 3: Sleep and age (5 points)
+
+Is there a relationship between hours of sleep and age?
+
+```{r}
+#| label: problem3
+# a. Scatterplot
+
+# b. Pearson correlation with tidy()
+```
+
+*c. Is the relationship statistically significant? Interpret.*
+
+## Bonus (optional, 5 points)
+
+Investigate two variables of your choice: scatterplot, correlation test, assumption checks, and interpretation.
+
+```{r}
+#| label: bonus
+
+```

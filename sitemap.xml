@@ -1,15 +1,67 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
+    <loc>https://epi553.muntasirmasum.com/resources/submitting-your-work.html</loc>
+    <lastmod>2026-11-13T03:51:16.423Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/resources/r-setup.html</loc>
+    <lastmod>2026-11-13T03:51:16.420Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/resources/index.html</loc>
+    <lastmod>2026-11-13T03:15:52.268Z</lastmod>
+  </url>
+  <url>
     <loc>https://epi553.muntasirmasum.com/lectures/simple-linear-regression.html</loc>
-    <lastmod>2026-11-03T02:49:59.679Z</lastmod>
+    <lastmod>2026-11-13T02:48:29.827Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/lectures/matrix-algebra.html</loc>
+    <lastmod>2026-11-13T03:51:16.417Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/lectures/anova.html</loc>
+    <lastmod>2026-11-13T03:58:02.640Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/labs/lab-02-anova.html</loc>
+    <lastmod>2026-11-13T03:56:31.358Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/labs/index.html</loc>
+    <lastmod>2026-11-13T03:07:29.452Z</lastmod>
   </url>
   <url>
     <loc>https://epi553.muntasirmasum.com/index.html</loc>
     <lastmod>2026-11-03T02:37:38.445Z</lastmod>
   </url>
   <url>
+    <loc>https://epi553.muntasirmasum.com/labs/lab-01-nhanes.html</loc>
+    <lastmod>2026-11-13T03:52:01.319Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/labs/lab-03-correlation.html</loc>
+    <lastmod>2026-11-13T03:51:16.419Z</lastmod>
+  </url>
+  <url>
     <loc>https://epi553.muntasirmasum.com/lectures/index.html</loc>
-    <lastmod>2026-11-03T02:01:51.469Z</lastmod>
+    <lastmod>2026-11-13T02:50:06.116Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/lectures/review-epi552.html</loc>
+    <lastmod>2026-11-13T03:51:16.418Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/lectures/statistical-modeling.html</loc>
+    <lastmod>2026-11-13T03:53:39.643Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/resources/intro-to-r.html</loc>
+    <lastmod>2026-11-13T03:51:16.420Z</lastmod>
+  </url>
+  <url>
+    <loc>https://epi553.muntasirmasum.com/resources/setup-checklist.html</loc>
+    <lastmod>2026-11-13T03:51:16.422Z</lastmod>
   </url>
 </urlset>

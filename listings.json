@@ -1,7 +1,28 @@
 [
   {
+    "listing": "/resources/index.html",
+    "items": [
+      "/resources/r-setup.html",
+      "/resources/intro-to-r.html",
+      "/resources/setup-checklist.html",
+      "/resources/submitting-your-work.html"
+    ]
+  },
+  {
+    "listing": "/labs/index.html",
+    "items": [
+      "/labs/lab-01-nhanes.html",
+      "/labs/lab-02-anova.html",
+      "/labs/lab-03-correlation.html"
+    ]
+  },
+  {
     "listing": "/lectures/index.html",
     "items": [
+      "/lectures/review-epi552.html",
+      "/lectures/anova.html",
+      "/lectures/matrix-algebra.html",
+      "/lectures/statistical-modeling.html",
       "/lectures/simple-linear-regression.html"
     ]
   }
