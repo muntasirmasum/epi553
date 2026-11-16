@@ -1,0 +1,1111 @@
+---
+title: "Multiple Linear Regression"
+subtitle: "Model a continuous outcome with several predictors and interpret each partial coefficient."
+description: "Partial coefficients, t and F tests, R² and adjusted R², missing data, adjusted predictions, and an interaction, using mentally unhealthy days in BRFSS 2020."
+order: 6
+unit: "Linear regression"
+categories: [Linear regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- write the multiple linear regression model and explain what a partial coefficient means;
+- fit nested models in R and interpret each coefficient, holding the other predictors constant;
+- test single coefficients with t-tests and the whole model with the overall F-test;
+- compare models with $R^2$, adjusted $R^2$, and the root MSE;
+- describe the three missing-data mechanisms and what complete-case analysis assumes;
+- show adjusted predictions, check the residuals, and test an interaction.
+:::
+
+## Introduction
+
+In the previous lectures, we used Simple Linear Regression (SLR) to model a continuous outcome as a function of a **single** predictor. But real-world health phenomena are never driven by one variable alone. A person's mental health is shaped by how much they sleep, how physically ill they are, how old they are, their income, their sex, and much more, all at once.
+
+**Multiple Linear Regression (MLR)** extends SLR to accommodate this complexity. It allows us to:
+
+- **Adjust for confounding:** estimate the association between an exposure and outcome after accounting for other covariates
+- **Improve prediction:** use multiple pieces of information to better forecast an outcome
+- **Model effect modification:** examine whether the effect of one variable changes across levels of another
+- **Gain precision:** by explaining additional variance in the outcome, we can reduce uncertainty in our estimates
+
+In epidemiology, MLR is our primary tool for multivariable analysis of continuous outcomes.
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(plotly)
+library(broom)
+library(ggeffects)
+library(gtsummary)
+library(GGally)
+```
+
+### The BRFSS 2020 Dataset
+
+We continue using the **Behavioral Risk Factor Surveillance System (BRFSS) 2020**, a large telephone survey of U.S. adults conducted by the CDC. The full file has 401,958 respondents, with detailed information on health behaviors, chronic conditions, and social determinants of health.
+
+**Research question for today:**
+
+> *What individual, behavioral, and socioeconomic factors are associated with the number of mentally unhealthy days in the past 30 days among U.S. adults?*
+
+This is a quintessential epidemiological question: we have a health outcome (mental health days) and want to understand its multivariable determinants while appropriately controlling for confounders.
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode eight variables and draw a random sample of 5,000 adults with complete data.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the eight BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "INCOME2", "SEXVAR",
+           "EXERANY2", "_BMI5")
+) |>
+  janitor::clean_names()
+```
+
+```{r}
+#| label: prepare-data
+# ── Recode and clean ──────────────────────────────────────────────────────────
+brfss_mlr <- brfss_full |>
+  mutate(
+    # Outcome: mentally unhealthy days in past 30 (88 = none = 0; 77/99 = DK/refused = NA)
+    menthlth_days = case_when(
+      menthlth == 88              ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                        ~ NA_real_
+    ),
+    # Physical health days (key predictor)
+    physhlth_days = case_when(
+      physhlth == 88              ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                        ~ NA_real_
+    ),
+    # Sleep hours (practical cap at 14)
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                        ~ NA_real_
+    ),
+    # Age (capped at 80 per BRFSS coding)
+    age = age80,
+    # Income category (ordinal 1–8)
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Exercise in past 30 days (any physical activity)
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    # BMI (stored as integer × 100 in BRFSS)
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    # Income as labeled factor (for display)
+    income_f = factor(income2, levels = 1:8,
+      labels = c("<$10k", "$10-15k", "$15-20k", "$20-25k",
+                 "$25-35k", "$35-50k", "$50-75k", ">$75k"))
+  ) |>
+  filter(
+    !is.na(menthlth_days),
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(age),   age >= 18,
+    !is.na(income_cat),
+    !is.na(sex),
+    !is.na(exercise)
+  )
+
+# ── Analytic sample (reproducible random sample) ────────────────────────────
+set.seed(553)
+brfss_mlr <- brfss_mlr |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age,
+         income_cat, income_f, sex, exercise, bmi) |>
+  slice_sample(n = 5000)
+
+tibble(Metric = c("Observations", "Variables"),
+       Value  = c(nrow(brfss_mlr), ncol(brfss_mlr))) |>
+  kable(caption = "Analytic Dataset Dimensions") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Descriptive Statistics
+
+```{r}
+#| label: descriptive-gtsummary
+brfss_mlr |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age,
+         income_f, sex, exercise) |>
+  tbl_summary(
+    label = list(
+      menthlth_days ~ "Mentally unhealthy days (past 30)",
+      physhlth_days ~ "Physically unhealthy days (past 30)",
+      sleep_hrs     ~ "Sleep (hours/night)",
+      age           ~ "Age (years)",
+      income_f      ~ "Household income",
+      sex           ~ "Sex",
+      exercise      ~ "Any physical activity (past 30 days)"
+    ),
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 1,
+    missing = "no"
+  ) |>
+  add_n() |>
+  # add_overall() |>
+  bold_labels() |>
+  italicize_levels() |>
+  modify_caption("Table 1. Descriptive statistics, BRFSS 2020 analytic sample (n = 5,000)") |>
+  as_kable_extra()
+```
+
+```{r}
+#| label: outcome-distribution
+#| fig-cap: Distribution of Mentally Unhealthy Days (BRFSS 2020)
+p_hist <- ggplot(brfss_mlr, aes(x = menthlth_days)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.85) +
+  labs(
+    title    = "Distribution of Mentally Unhealthy Days in the Past 30 Days",
+    subtitle = "BRFSS 2020 Analytic Sample (n = 5,000)",
+    x        = "Number of Mentally Unhealthy Days",
+    y        = "Count"
+  ) +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_hist)
+```
+
+[Figure description: histogram of mentally unhealthy days for the 5,000 adults. The tallest bar by far is at 0 days (`r round(100 * mean(brfss_mlr$menthlth_days == 0))`% of the sample); smaller spikes appear at round numbers such as 5, 10, 15, and 20, and at 30 days (`r round(100 * mean(brfss_mlr$menthlth_days == 30))`%).]{.visually-hidden}
+
+::: {.callout-note}
+## Note
+
+The outcome is right-skewed: most respondents (`r round(100 * mean(brfss_mlr$menthlth_days == 0))`%) report zero mentally unhealthy days, with a long tail toward 30. This is common in count outcomes and is worth keeping in mind when we evaluate model assumptions later.
+:::
+
+## Part 1: Guided Practice
+
+### 1. From Simple to Multiple: The Big Picture
+
+#### 1.1 Extending the Model
+
+Recall the SLR model:
+
+$$Y_i = \beta_0 + \beta_1 X_i + \varepsilon_i$$
+
+Multiple linear regression simply adds more predictors:
+
+$$Y_i = \beta_0 + \beta_1 X_{1i} + \beta_2 X_{2i} + \cdots + \beta_p X_{pi} + \varepsilon_i$$
+
+Or equivalently, using summation notation:
+
+$$Y_i = \beta_0 + \sum_{j=1}^{p} \beta_j X_{ji} + \varepsilon_i$$
+
+| Symbol | Meaning |
+|--------|---------|
+| $Y_i$ | Outcome for subject $i$ (mentally unhealthy days) |
+| $\beta_0$ | Intercept: expected value of $Y$ when all $X$s = 0 |
+| $\beta_j$ | Partial regression coefficient for predictor $j$ |
+| $X_{ji}$ | Value of predictor $j$ for subject $i$ |
+| $p$ | Number of predictors in the model |
+| $\varepsilon_i$ | Random error for subject $i$, $\varepsilon_i \overset{iid}{\sim} N(0,\sigma^2)$ |
+
+The word **partial** is critical. Each $\beta_j$ represents the estimated change in $E(Y)$ for a one-unit increase in $X_j$, **holding all other predictors constant**. This "holding constant" is the mathematical mechanism by which we adjust for confounding.
+
+#### 1.2 Three Goals of Regression in Epidemiology
+
+There are three analytic goals. Understanding which goal is driving your analysis determines how you build and interpret your model:
+
+| Goal | Question | Example |
+|------|----------|---------|
+| **Descriptive** | How do the $X$s describe $Y$ in this sample? | What variables are correlated with mental health days in BRFSS 2020? |
+| **Predictive** | Do the $X$s help predict $Y$ statistically? | Can we build a model to identify people likely to report many mentally unhealthy days? |
+| **Associative (Etiologic)** | What is the effect of a specific $X$ on $Y$, controlling for confounders? | What is the effect of sleep on mental health days, after adjusting for age, income, and physical health? |
+
+> In epidemiology, we are most often doing **associative** analysis: estimating causal or causal-adjacent effects after controlling for confounding.
+
+#### 1.3 Why MLR is More Challenging than SLR
+
+- **Model selection is non-trivial:** there may be many candidate predictors, and the "right" model depends on the scientific question.
+- **You cannot visualize** the relationship in $p$-dimensional space. We work with 2D projections (partial regression plots, predicted vs. observed plots).
+- **Interpretation requires discipline:** the "holding all else constant" framing must always accompany coefficient interpretation.
+- **Coefficients come from matrix algebra:** the closed-form solution $\hat{\boldsymbol{\beta}} = (\mathbf{X}^\top\mathbf{X})^{-1}\mathbf{X}^\top\mathbf{y}$ (from the Matrix Algebra lecture) still exists, but unlike SLR it is no longer practical to compute each coefficient by hand, so we let software do it.
+
+### 2. Assumptions of Multiple Linear Regression
+
+The assumptions are a direct extension of the SLR assumptions, often summarized with the **LINE** mnemonic:
+
+| | Assumption | In MLR |
+|-|------------|--------|
+| **L** | Linearity | $E(Y)$ is a **linear function** of the $\beta_j$s. Non-linear functions of $X$ (e.g., $X^2$, $\log X$) are allowed, as long as the model is linear in the coefficients. |
+| **I** | Independence | Observations $Y_i$ are independent of each other. |
+| **N** | Normality | Errors $\varepsilon_i \sim N(0, \sigma^2)$. Required for inference (t-tests, CIs). Not required for OLS estimation itself. |
+| **E** | Equal variance | $\text{Var}(\varepsilon_i) = \sigma^2$ for all $i$ (homoscedasticity). |
+
+**Important clarifications:**
+
+- The **linearity** assumption refers to linearity in the *parameters* ($\beta$s), not in the predictors. Including $X^2$ as a predictor doesn't violate linearity.
+- **Normality** is only needed for valid inference. With large samples (like BRFSS), the Central Limit Theorem means mild violations have little effect on tests and confidence intervals. (Non-normal errors do not bias the coefficients.)
+- **Homoscedasticity** matters most for standard errors and inference. Mild departures are tolerable; severe heteroscedasticity requires correction (robust SEs, WLS).
+
+```{r}
+#| label: assumptions-viz
+#| fig-alt: !expr local({r <- round(cor(brfss_mlr[, c("menthlth_days", "physhlth_days", "sleep_hrs", "age")]), 3); paste0("Scatterplot matrix of mentally unhealthy days, physically unhealthy days, sleep hours, and age. Both day counts pile up at 0 with a small bump at 30; sleep peaks at 6 to 8 hours; age spreads from 18 to 80. Correlations with mental health days are ", r[1, 2], " for physical health days, ", r[1, 3], " for sleep, and ", r[1, 4], " for age; among the predictors they are ", r[2, 3], " (physical health and sleep), ", r[2, 4], " (physical health and age), and ", r[3, 4], " (sleep and age).")})
+#| fig-cap: Visualizing Key Predictors vs. Mental Health Days
+# Pairs plot of continuous predictors vs outcome
+brfss_mlr |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age) |>
+  rename(
+    `Mental Health\nDays`  = menthlth_days,
+    `Physical Health\nDays` = physhlth_days,
+    `Sleep\n(hrs)`         = sleep_hrs,
+    Age                    = age
+  ) |>
+  ggpairs(
+    lower  = list(continuous = wrap("points", alpha = 0.05, size = 0.5)),
+    diag   = list(continuous = wrap("densityDiag", fill = "steelblue", alpha = 0.5)),
+    upper  = list(continuous = wrap("cor", size = 4)),
+    title  = "Pairwise Relationships Among Key Variables (BRFSS 2020)"
+  ) +
+  theme_minimal(base_size = 11)
+```
+
+### 3. Missing Data
+
+Before fitting any model, we must address missing data. Let's expand on it with our BRFSS context.
+
+#### 3.1 Why Missing Data Matters
+
+Statistical software performs **complete case analysis** by default: observations with any missing value on any variable in the model are dropped. This has two consequences:
+
+1. **Loss of sample size**, which reduces power
+2. **Potential bias**, if the missing cases differ systematically from observed cases
+
+The direction and magnitude of bias depends on the **mechanism** of missingness.
+
+#### 3.2 The Three Mechanisms
+
+| Mechanism | Definition | Bias? | Example in BRFSS |
+|-----------|-----------|-------|-----------------|
+| **MCAR** (Missing Completely at Random) | P(missing) is unrelated to observed or unobserved data | No | Lab equipment randomly fails; a beaker is dropped |
+| **MAR** (Missing at Random) | P(missing) depends on observed data, not on the missing value itself | Potentially, but adjustable | Men are more likely to skip the income question; once you account for sex, the missingness is independent of income |
+| **MNAR** (Missing Not at Random) | P(missing) depends on the unobserved value itself | Yes, difficult to correct | People with very low income refuse to report income because of the stigma |
+
+::: {.callout-note}
+## MCAR is rarely a safe assumption with human subjects data.
+
+In BRFSS, income non-response is strongly socioeconomically patterned, a classic MNAR concern.
+:::
+
+#### 3.3 Implications for Practice
+
+- For MCAR and MAR, **multiple imputation** (using the `mice` package in R) can recover unbiased estimates.
+- For MNAR, there is no general statistical fix. You must **acknowledge the limitation** and reason about the direction of potential bias.
+- In this course, we will use **complete case analysis** but will always note the amount and likely pattern of missingness.
+
+Each BRFSS variable has its own codes for a missing answer. For the day counts (`MENTHLTH`, `PHYSHLTH`), 88 means "none", which is a real answer (zero days), while 77 and 99 mean "don't know" and "refused". `SLEPTIM1` and `INCOME2` use 77 and 99, `EXERANY2` uses 7 and 9, and age, sex, and BMI are simply blank when missing. Counting 88 as missing, or applying 77 and 99 to age, would be wrong.
+
+```{r}
+#| label: missing-data-check
+# Percentage of the full BRFSS 2020 file with no usable answer, using each
+# variable's own missing codes
+missing_tbl <- brfss_full |>
+  summarise(
+    menthlth = mean(is.na(menthlth) | menthlth %in% c(77, 99)),
+    physhlth = mean(is.na(physhlth) | physhlth %in% c(77, 99)),
+    sleptim1 = mean(is.na(sleptim1) | sleptim1 %in% c(77, 99)),
+    age80    = mean(is.na(age80)),
+    income2  = mean(is.na(income2)  | income2  %in% c(77, 99)),
+    sexvar   = mean(is.na(sexvar)),
+    exerany2 = mean(is.na(exerany2) | exerany2 %in% c(7, 9)),
+    bmi5     = mean(is.na(bmi5))
+  ) |>
+  pivot_longer(everything(), names_to = "Variable", values_to = "Pct_Missing") |>
+  mutate(Pct_Missing = round(100 * Pct_Missing, 1)) |>
+  arrange(desc(Pct_Missing))
+
+missing_tbl |>
+  kable(
+    caption = "Table 2. Missing, don't know, or refused (%), BRFSS 2020 full file",
+    col.names = c("Variable", "% Missing / DK / Refused")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Income (`income2`) is missing most often (`r missing_tbl$Pct_Missing[missing_tbl$Variable == "income2"]`% of respondents), which is why the income question deserves the MNAR concern above. The other variables are missing for at most `r max(missing_tbl$Pct_Missing[missing_tbl$Variable != "income2"])`%.
+
+### 4. Fitting the MLR Model in R
+
+#### 4.1 Model Specification
+
+We will build our model in stages, a common and useful approach that mirrors what you would do in a real epidemiological analysis.
+
+**Model 1, unadjusted (SLR baseline):** Mentally unhealthy days ~ Physical health days
+
+**Model 2, sleep added:** + Sleep hours
+
+**Model 3, full model:** + Age + Income + Sex + Exercise
+
+This sequential approach lets us see how each block of variables changes the coefficients and model fit.
+
+```{r}
+#| label: fit-models
+# Model 1: Unadjusted
+m1 <- lm(menthlth_days ~ physhlth_days, data = brfss_mlr)
+
+# Model 2: Add sleep
+m2 <- lm(menthlth_days ~ physhlth_days + sleep_hrs, data = brfss_mlr)
+
+# Model 3: Full multivariable model
+m3 <- lm(menthlth_days ~ physhlth_days + sleep_hrs + age + income_cat + sex + exercise,
+         data = brfss_mlr)
+```
+
+#### 4.2 The `lm()` Formula Interface
+
+In R, the `lm()` formula has the structure:
+
+```
+lm(outcome ~ predictor1 + predictor2 + predictor3, data = dataset)
+```
+
+- The outcome is to the **left** of the `~`
+- Predictors are on the **right**, separated by `+`
+- R automatically creates dummy variables for factors
+- The intercept is included by default (suppress with `- 1` if needed)
+
+#### 4.3 Examining Model 3 Output
+
+```{r}
+#| label: model3-summary
+summary(m3)
+```
+
+```{r}
+#| label: model3-tidy-table
+tidy(m3, conf.int = TRUE) |>
+  mutate(
+    term = dplyr::recode(term,
+      "(Intercept)"   = "Intercept",
+      "physhlth_days" = "Physical health days",
+      "sleep_hrs"     = "Sleep (hours/night)",
+      "age"           = "Age (years)",
+      "income_cat"    = "Income (ordinal 1-8)",
+      "sexFemale"     = "Sex: Female (ref = Male)",
+      "exerciseYes"   = "Exercise: Yes (ref = No)"
+    ),
+    p.value = format.pval(p.value, digits = 3, eps = 0.001),
+    across(where(is.numeric), ~ round(., 4))
+  ) |>
+  kable(
+    caption   = "Table 3. Multiple Linear Regression: Mentally Unhealthy Days ~ Multiple Predictors (BRFSS 2020, n = 5,000)",
+    col.names = c("Term", "Estimate", "Std. Error", "t-statistic", "p-value", "95% CI Lower", "95% CI Upper"),
+    format = "html"
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = TRUE) |>
+  row_spec(0, bold = TRUE) |>
+  row_spec(c(2, 3), background = "#EBF5FB", color = "#1f2d3a")
+```
+
+### 5. Interpreting Coefficients
+
+This is the most important and most commonly mis-stated skill in applied regression. Let's do it carefully.
+
+#### 5.1 The General Rule
+
+::: {.callout-note}
+## For predictor $X_j$
+
+$\hat{\beta}_j$ is the estimated change in the **mean** of $Y$ for a **one-unit increase** in $X_j$, **holding all other predictors in the model constant**.
+:::
+
+The phrase "holding all other predictors constant" (also called *ceteris paribus* or *partial effect*) is what distinguishes MLR from SLR. It is the mathematical expression of confounder adjustment.
+
+```{r}
+#| label: extract-coefs
+b <- round(coef(m3), 3)
+ci <- round(confint(m3), 3)
+pv <- coef(summary(m3))[, "Pr(>|t|)"]   # p-values, used in the text below
+```
+
+#### 5.2 The Fitted Equation
+
+$$\widehat{\text{Mental Health Days}} = `r b[1]` `r pm(b[2])`(\text{Phys. Health Days}) `r pm(b[3])`(\text{Sleep}) `r pm(b[4])`(\text{Age}) `r pm(b[5])`(\text{Income}) `r pm(b[6])`(\text{Female}) `r pm(b[7])`(\text{Exercise: Yes})$$
+
+#### 5.3 Interpreting Each Term
+
+**Physical health days ($\hat{\beta}$ = `r b[2]`):**
+Each additional day of poor physical health is associated with an estimated **`r abs(b[2])` `r more_fewer(b[2])` mentally unhealthy days** on average, holding sleep, age, income, sex, and exercise constant (95% CI: `r ci[2,1]` to `r ci[2,2]`; `r sig_text(pv[2])`). It has the largest t-statistic in the model (t = `r round(coef(summary(m3))[2, "t value"], 1)`), consistent with the two-way link between physical and mental health documented in the literature.
+
+**Sleep hours ($\hat{\beta}$ = `r b[3]`):**
+Each additional hour of sleep per night is associated with an estimated **`r abs(b[3])` `r more_fewer(b[3])` mentally unhealthy days** on average, adjusting for all other covariates (95% CI: `r ci[3,1]` to `r ci[3,2]`; `r sig_text(pv[3])`). The negative sign indicates an inverse association: more sleep goes with fewer poor mental health days.
+
+**Age ($\hat{\beta}$ = `r b[4]`):**
+Each additional year of age is associated with **`r abs(b[4])` `r more_fewer(b[4])` mentally unhealthy days** on average, holding all else constant (`r sig_text(pv[4])`). This finding is well documented: older adults often report fewer mental health difficulties, possibly because of better emotion regulation, survivor bias, or cohort effects.
+
+**Income category ($\hat{\beta}$ = `r b[5]`):**
+Each one-unit increase in the income category (on the 1 to 8 ordinal scale) is associated with **`r abs(b[5])` `r more_fewer(b[5])` mentally unhealthy days** on average (`r sig_text(pv[5])`), consistent with the well-established socioeconomic gradient in mental health.
+
+**Sex: Female ($\hat{\beta}$ = `r b[6]`):**
+Compared to males (the reference group), females report an estimated **`r abs(b[6])` `r more_fewer(b[6])` mentally unhealthy days** on average, holding all other variables constant (`r sig_text(pv[6])`).
+
+**Exercise: Yes ($\hat{\beta}$ = `r b[7]`):**
+People who engaged in any physical activity in the past 30 days report an estimated **`r abs(b[7])` `r more_fewer(b[7])` mentally unhealthy days** compared to those who did not exercise, adjusting for all other covariates. This difference is `r sig_text(pv[7])``r if (pv[7] >= 0.05) ": once the other predictors are held constant, the data are consistent with no difference by exercise" else ""`.
+
+**Intercept ($\hat{\beta}_0$ = `r b[1]`):**
+The estimated mean mental health days for a person with zero physically unhealthy days, zero sleep hours, age = 0, income category = 0, who is male and does not exercise. This is a **mathematical artifact**, not a meaningful quantity in context.
+
+::: {.callout-note}
+## Epidemiological insight
+
+Notice that the physical health coefficient changes when we add other covariates: it moves from `r round(coef(m1)[2], 3)` in Model 1 to `r round(coef(m3)[2], 3)` in Model 3, a `r round(100 * abs(coef(m1)[2] - coef(m3)[2]) / abs(coef(m1)[2]), 1)`% change. This change represents the **confounding** that age, income, sleep, sex, and exercise together introduce into the crude association between physical and mental health.
+:::
+
+```{r}
+#| label: confounding-comparison
+# Compare the physhlth_days coefficient across models
+tribble(
+  ~Model, ~`Physical Health Days β̂`, ~`95% CI`, ~`Adj. R²`,
+  "M1 (unadjusted)", round(coef(m1)[2], 3),
+    paste0("(", round(confint(m1)[2,1],3), ", ", round(confint(m1)[2,2],3), ")"),
+    round(summary(m1)$adj.r.squared, 3),
+  "M2 (+sleep)",     round(coef(m2)[2], 3),
+    paste0("(", round(confint(m2)[2,1],3), ", ", round(confint(m2)[2,2],3), ")"),
+    round(summary(m2)$adj.r.squared, 3),
+  "M3 (full)",       round(coef(m3)[2], 3),
+    paste0("(", round(confint(m3)[2,1],3), ", ", round(confint(m3)[2,2],3), ")"),
+    round(summary(m3)$adj.r.squared, 3)
+) |>
+  kable(caption = "Table 4. Physical Health Days Coefficient Across Sequential Models") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(0, bold = TRUE)
+```
+
+### 6. Hypothesis Testing for Individual Coefficients
+
+#### 6.1 The t-Test for Each $\hat{\beta}_j$
+
+For each predictor $X_j$, we test:
+
+$$H_0: \beta_j = 0 \quad \text{vs.} \quad H_A: \beta_j \neq 0$$
+
+(given all other predictors are in the model)
+
+The test statistic is:
+
+$$t = \frac{\hat{\beta}_j}{SE(\hat{\beta}_j)} \sim t_{n-p-1}$$
+
+where $n$ is sample size and $p$ is the number of predictors. We compare this to a $t$-distribution with $n - p - 1$ degrees of freedom.
+
+::: {.callout-note}
+## Critically
+
+This tests whether $X_j$ has a statistically significant **partial** association with $Y$, given the other predictors already in the model. A predictor might be significant alone (unadjusted) but non-significant in the multivariable model due to overlap with other predictors (multicollinearity or confounding).
+:::
+
+#### 6.2 Interpreting the p-Values
+
+```{r}
+#| label: pvalues-table
+tidy(m3, conf.int = TRUE) |>
+  mutate(
+    Significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      p.value < 0.1   ~ ".",
+      TRUE            ~ "ns"
+    ),
+    term = dplyr::recode(term,
+      "(Intercept)"    = "Intercept",
+      "physhlth_days"  = "Physical health days",
+      "sleep_hrs"      = "Sleep (hours/night)",
+      "age"            = "Age (years)",
+      "income_cat"     = "Income (ordinal 1-8)",
+      "sexFemale"      = "Sex: Female",
+      "exerciseYes"    = "Exercise: Yes"
+    )
+  ) |>
+  select(term, estimate, std.error, statistic, p.value, conf.low, conf.high, Significance) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), ~ round(., 4))) |>
+  kable(
+    caption   = "Table 5. Hypothesis Tests for Each Partial Coefficient (Model 3)",
+    col.names = c("Predictor", "Estimate (β)", "SE", "t", "p-value", "CI Lower", "CI Upper", "Sig.")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: coef-plot
+#| fig-alt: !expr local({tt <- tidy(m3, conf.int = TRUE)[-1, ]; e <- round(tt$estimate, 2); paste0("Dot-and-whisker plot of the six partial coefficients with 95% confidence intervals and a dashed line at zero. Physical health days (", e[1], ") and age (", e[3], ") have very narrow intervals close to zero; income (", e[4], ") and sleep (", e[2], ") are negative; female sex (", e[5], ") is the largest, with the widest interval among the significant terms; exercise (", e[6], ") is the only interval that crosses zero and is drawn in red as non-significant.")})
+#| fig-cap: 'Coefficient Plot: Partial Associations with Mental Health Days'
+tidy(m3, conf.int = TRUE) |>
+  filter(term != "(Intercept)") |>
+  mutate(
+    term = dplyr::recode(term,
+      "physhlth_days" = "Physical health days",
+      "sleep_hrs"     = "Sleep (hours/night)",
+      "age"           = "Age (years)",
+      "income_cat"    = "Income (1-8)",
+      "sexFemale"     = "Sex: Female",
+      "exerciseYes"   = "Exercise: Yes"
+    ),
+    term = fct_reorder(term, estimate),
+    sig  = ifelse(p.value < 0.05, "Significant (p < 0.05)", "Non-significant")
+  ) |>
+  ggplot(aes(x = estimate, y = term, color = sig)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.25, linewidth = 0.9,
+                orientation = "y") +
+  geom_point(size = 3.5) +
+  scale_color_manual(values = c("Significant (p < 0.05)" = "steelblue",
+                                "Non-significant" = "tomato")) +
+  labs(
+    title    = "Partial Regression Coefficients with 95% Confidence Intervals",
+    subtitle = "Outcome: Mentally Unhealthy Days (BRFSS 2020, n = 5,000)",
+    x        = "Estimated Change in Mental Health Days (β̂)",
+    y        = NULL,
+    color    = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "top")
+```
+
+### 7. The Overall F-Test and ANOVA Decomposition
+
+#### 7.1 Partitioning Variability
+
+Just as in SLR, MLR partitions total variability in $Y$:
+
+$$\underbrace{SSY}_{\text{Total}} = \underbrace{SSR}_{\text{Model explains}} + \underbrace{SSE}_{\text{Model doesn't explain}}$$
+
+| Source | Sum of Squares | df | Mean Square | F |
+|--------|---------------|----|-----------|----|
+| Model (Regression) | $SSR$ | $p$ | $MSR = SSR/p$ | $F = MSR/MSE$ |
+| Error (Residual) | $SSE$ | $n-p-1$ | $MSE = SSE/(n-p-1)$ | |
+| Total | $SSY$ | $n-1$ | | |
+
+With $p$ predictors, the model uses $p$ degrees of freedom (one for each $\hat{\beta}_j$), leaving $n - p - 1$ residual degrees of freedom.
+
+#### 7.2 The Overall F-Test
+
+The omnibus F-test asks:
+
+$$H_0: \beta_1 = \beta_2 = \cdots = \beta_p = 0 \quad \text{(none of the predictors matter)}$$
+$$H_A: \text{At least one } \beta_j \neq 0$$
+
+$$F = \frac{MSR}{MSE} \sim F_{p,\; n-p-1} \quad \text{under } H_0$$
+
+A large F-value (small p-value) means the predictors collectively explain more variation than expected by chance.
+
+```{r}
+#| label: anova-table
+anova_m3 <- anova(m3)
+print(anova_m3)
+```
+
+```{r}
+#| label: f-test-glance
+glance(m3) |>
+  select(r.squared, adj.r.squared, sigma, statistic, p.value, df, df.residual, nobs) |>
+  mutate(across(everything(), as.numeric)) |>
+  pivot_longer(everything(), names_to = "Statistic", values_to = "Value") |>
+  mutate(Value = if_else(Statistic == "p.value",
+                         format.pval(Value, digits = 3, eps = 0.001),
+                         as.character(round(Value, 4)))) |>
+  mutate(Statistic = dplyr::recode(Statistic,
+    "r.squared"     = "R²",
+    "adj.r.squared" = "Adjusted R²",
+    "sigma"         = "Residual Std. Error (Root MSE)",
+    "statistic"     = "F-statistic",
+    "p.value"       = "p-value (overall F-test)",
+    "df"            = "Model df (p)",
+    "df.residual"   = "Residual df (n − p − 1)",
+    "nobs"          = "n (observations)"
+  )) |>
+  kable(caption = "Table 6. Overall model summary, Model 3") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+For Model 3, F(`r glance(m3)$df`, `r glance(m3)$df.residual`) = `r round(glance(m3)$statistic, 1)`, `r fmt_p(glance(m3)$p.value)`: the six predictors together explain `r if (glance(m3)$p.value < 0.05) "more" else "no more"` variation than we would expect by chance.
+
+### 8. Coefficient of Determination: $R^2$ and Adjusted $R^2$
+
+#### 8.1 $R^2$
+
+$$R^2 = \frac{SSR}{SSY} = 1 - \frac{SSE}{SSY}$$
+
+$R^2$ is the **proportion of total variance in $Y$ explained by the model**. It ranges from 0 to 1.
+
+**Critical property:** $R^2$ **always increases** (or stays the same) when you add a predictor, even if that predictor is random noise. It cannot be used to compare models with different numbers of predictors.
+
+#### 8.2 Adjusted $R^2$
+
+$$R^2_{adj} = 1 - \frac{(1 - R^2)(n - 1)}{n - p - 1}$$
+
+Adjusted $R^2$ penalizes for the number of predictors $p$. It only increases when a new predictor improves the model by more than chance alone.
+
+- $R^2_{adj} \leq R^2$ always
+- $R^2_{adj}$ can **decrease** if you add a useless predictor
+- Use $R^2_{adj}$ when comparing models with different numbers of predictors
+
+```{r}
+#| label: r2-comparison
+tribble(
+  ~Model, ~Predictors, ~R2, ~`Adj. R²`,
+  "M1: Physical health only",      1, round(summary(m1)$r.squared, 4), round(summary(m1)$adj.r.squared, 4),
+  "M2: + Sleep",                   2, round(summary(m2)$r.squared, 4), round(summary(m2)$adj.r.squared, 4),
+  "M3: Full (+ age, income, sex, exercise)", 6,
+    round(summary(m3)$r.squared, 4), round(summary(m3)$adj.r.squared, 4)
+) |>
+  kable(caption = "Table 7. R² and Adjusted R² Across Sequential Models") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(3, bold = TRUE, background = "#EBF5FB", color = "#1f2d3a")
+```
+
+::: {.callout-tip}
+## Interpretation
+
+Model 3 explains `r round(100 * summary(m3)$r.squared, 1)`% of the variance in mentally unhealthy days (adjusted $R^2$ = `r round(summary(m3)$adj.r.squared, 3)`). $R^2$ for mental health outcomes in population surveys is typically low (5% to 20%), and that's expected. Mental health is shaped by hundreds of unmeasured factors, such as genetics, life events, social support, and trauma history. A low R² does not mean the model is "wrong" or "useless" for estimating associations. Statistical significance (the t-tests) and the magnitude and direction of coefficients matter more for etiologic questions.
+:::
+
+#### 8.3 Root MSE
+
+$$RMSE = \sqrt{MSE} = s_{Y|X}$$
+
+The Root MSE (also called the **Residual Standard Error** in R output) is the estimated standard deviation of the errors. It tells you, on average, how many **days** the model's prediction is off by.
+
+```{r}
+#| label: rmse
+rmse_m3 <- round(summary(m3)$sigma, 2)
+cat("Root MSE (Model 3):", rmse_m3, "mentally unhealthy days\n")
+```
+
+### 9. Visualizing Predicted Values and Effects
+
+#### 9.1 Predicted vs. Observed
+
+```{r}
+#| label: pred-obs-plot
+#| fig-alt: !expr sprintf("Scatter plot of observed against fitted mentally unhealthy days for Model 3, with a dashed red line of perfect prediction and a navy LOESS curve. Observed values form horizontal bands at whole numbers, mostly at 0; fitted values run from %.1f to %.1f, so some predictions are below zero. The LOESS curve follows the dashed line for fitted values up to about 7 and rises above it at higher values.", min(fitted(m3)), max(fitted(m3)))
+#| fig-cap: Predicted vs. Observed Mental Health Days (Model 3)
+augment(m3) |>
+  ggplot(aes(x = .fitted, y = menthlth_days)) +
+  geom_point(alpha = 0.08, size = 0.8, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linewidth = 1, linetype = "dashed") +
+  geom_smooth(method = "loess", color = "darkblue", linewidth = 1, se = FALSE) +
+  labs(
+    title    = "Predicted vs. Observed Mentally Unhealthy Days",
+    subtitle = "Dashed = perfect prediction; Blue = LOESS smoother",
+    x        = "Fitted (Predicted) Values (Ŷ)",
+    y        = "Observed Mentally Unhealthy Days (Y)"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+#### 9.2 Marginal Effects Plots (`ggeffects`)
+
+The `ggeffects` package computes **adjusted predictions**: the predicted mean of $Y$ across values of one predictor, with all other predictors held at their means (or reference categories). This is a powerful visualization of what MLR is actually estimating.
+
+```{r}
+#| label: marginal-physhlth
+#| fig-alt: !expr local({g <- ggpredict(m3, terms = "physhlth_days"); sprintf("Line plot of predicted mentally unhealthy days against physically unhealthy days (0 to 30) with a gray 95%% confidence band. The line rises steadily from %.1f days at 0 to %.1f days at 30, and the band stays narrow.", g$predicted[1], g$predicted[nrow(g)])})
+#| fig-cap: 'Adjusted Predictions: Physical Health Days → Mental Health Days'
+ggpredict(m3, terms = "physhlth_days") |>
+  plot() +
+  labs(
+    title    = "Marginal Effect of Physical Health Days on Mentally Unhealthy Days",
+    subtitle = "Other covariates at their means (numeric) or reference levels (factors)",
+    x        = "Number of Physically Unhealthy Days (past 30)",
+    y        = "Predicted Mentally Unhealthy Days"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+#| label: marginal-sleep
+#| fig-alt: !expr local({g <- ggpredict(m3, terms = "sleep_hrs"); sprintf("Line plot of predicted mentally unhealthy days against sleep hours (%.0f to %.0f) with a gray 95%% confidence band. The line falls from %.1f days at %.0f hour to %.1f days at %.0f hours; the band is narrowest near 7 hours and widens at both ends.", min(g$x), max(g$x), g$predicted[1], g$x[1], g$predicted[nrow(g)], g$x[nrow(g)])})
+#| fig-cap: 'Adjusted Predictions: Sleep → Mental Health Days'
+ggpredict(m3, terms = "sleep_hrs") |>
+  plot() +
+  labs(
+    title    = "Marginal Effect of Sleep on Mentally Unhealthy Days",
+    subtitle = "Other covariates at their means (numeric) or reference levels (factors)",
+    x        = "Sleep Hours per Night",
+    y        = "Predicted Mentally Unhealthy Days"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+#| label: marginal-sex-exercise
+#| fig-alt: !expr local({g <- as.data.frame(ggpredict(m3, terms = c("exercise", "sex"))); v <- function(x, s) round(g$predicted[g$x == x & g$group == s], 1); paste0("Point-and-interval plot of predicted mentally unhealthy days by exercise (No, Yes) and sex. Women are higher than men in both exercise groups (no exercise ", v("No", "Female"), " versus ", v("No", "Male"), " days; exercise ", v("Yes", "Female"), " versus ", v("Yes", "Male"), "). Exercise lowers the prediction by only about ", round(abs(coef(m3)["exerciseYes"]), 1), " days for both sexes, and the intervals for No and Yes overlap.")})
+#| fig-cap: Adjusted Predictions by Sex and Exercise
+ggpredict(m3, terms = c("exercise", "sex")) |>
+  plot() +
+  labs(
+    title    = "Predicted Mental Health Days by Exercise Status and Sex",
+    subtitle = "Adjusted for physical health, sleep, age, income",
+    x        = "Any Physical Activity in Past 30 Days",
+    y        = "Predicted Mentally Unhealthy Days",
+    color    = "Sex", fill = "Sex"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+### 10. Residual Diagnostics
+
+We assess the LINE assumptions through residual plots. Use `plot(model)` in base R or `augment()` + ggplot2.
+
+```{r}
+#| label: residual-diagnostics
+#| fig-alt: !expr sprintf("Four diagnostic panels for Model 3. Residuals versus fitted shows parallel downward-sloping diagonal bands, one for each whole number of days, with the trend line dipping below zero at middle fitted values. The Q-Q plot bends sharply away from the reference line in an S shape with a heavy upper tail, reflecting the right skew. Scale-location shows curved bands and a rising trend line, so the spread grows with the fitted value. Residuals versus leverage shows all leverages below %.3f and no point near a Cook's distance contour.", max(hatvalues(m3)) + 0.0005)
+#| fig-height: 8
+#| fig-cap: Standard Residual Diagnostic Plots
+par(mfrow = c(2, 2))
+plot(m3, which = c(1, 2, 3, 5), col = adjustcolor("steelblue", alpha.f = 0.3), pch = 16)
+par(mfrow = c(1, 1))
+```
+
+**How to read each plot:**
+
+| Plot | What to Look For | Assumption Tested |
+|------|-----------------|-------------------|
+| Residuals vs. Fitted | Random scatter around 0; no pattern | Linearity + Homoscedasticity |
+| Normal Q-Q | Points follow diagonal line | Normality of residuals |
+| Scale-Location (√\|e\|) | Flat red line; constant spread | Homoscedasticity |
+| Residuals vs. Leverage | No points beyond the 0.5 or 1 Cook's distance contours | Influential observations |
+
+```{r}
+#| label: residuals-ggplot
+#| fig-alt: "Scatter plot of residuals against fitted values with a red dashed line at zero and a navy LOESS curve. Points fall on parallel downward-sloping diagonal lines, one for each observed number of days; the lowest and densest line is people with zero days. The LOESS curve stays near zero for fitted values from 0 to about 10 and rises at the highest fitted values."
+#| fig-cap: Residuals vs. Fitted (ggplot2)
+augment(m3) |>
+  ggplot(aes(x = .fitted, y = .resid)) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_point(alpha = 0.07, size = 0.8, color = "steelblue") +
+  geom_smooth(method = "loess", color = "darkblue", se = FALSE) +
+  labs(
+    title = "Residuals vs. Fitted Values",
+    subtitle = "Ideally: random scatter around zero, no systematic pattern",
+    x = "Fitted Values",
+    y = "Residuals (Y − Ŷ)"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+::: {.callout-note}
+## Note on our outcome
+
+Because mental health days is bounded at 0 and 30 and is heavily right-skewed, perfect normality and homoscedasticity are not achievable. Our large sample size (n = 5,000) provides robustness, and no single person is highly influential: the largest Cook's distance is `r signif(max(cooks.distance(m3)), 2)`. In practice, you might consider a log transformation or Poisson or negative binomial regression as alternatives, which we cover later in the course.
+:::
+
+### 11. Main Effects and Interaction Terms
+
+#### 11.1 Higher-Order Terms
+
+The MLR framework accommodates **higher-order terms** (polynomials, interactions) while remaining "linear in the parameters." Some key rules:
+
+- **Quadratic terms:** If you include $X^2$, you must also include $X$ itself.
+- **Interaction terms:** If you include $X_1 \times X_2$, you must include both $X_1$ and $X_2$ as main effects.
+
+These are called the **hierarchical principle** or **marginality rule** in regression modeling.
+
+#### 11.2 Testing for an Interaction
+
+Does the effect of sleep on mental health differ between males and females?
+
+```{r}
+#| label: interaction-model
+# Model with sleep × sex interaction
+m4_interact <- lm(menthlth_days ~ physhlth_days + sleep_hrs * sex + age + income_cat + exercise,
+                  data = brfss_mlr)
+
+tidy(m4_interact, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), ~ round(., 4))) |>
+  kable(
+    caption = "Table 8. Model with Sleep × Sex Interaction",
+    col.names = c("Term", "Estimate", "Std. Error", "t-statistic", "p-value", "95% CI Lower", "95% CI Upper")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: interaction-plot
+#| fig-alt: !expr local({b <- coef(m4_interact); sprintf("Predicted mentally unhealthy days against sleep hours for men and women from the interaction model, each with a 95%% confidence band. Both lines fall with more sleep and are nearly parallel (slope %.2f days per hour for men and %.2f for women), with women about %.1f days higher; the bands overlap.", b["sleep_hrs"], b["sleep_hrs"] + b["sleep_hrs:sexFemale"], b["sexFemale"] + b["sleep_hrs:sexFemale"] * 7)})
+#| fig-cap: 'Interaction: Effect of Sleep on Mental Health by Sex'
+ggpredict(m4_interact, terms = c("sleep_hrs", "sex")) |>
+  plot() +
+  labs(
+    title    = "Predicted Mental Health Days by Sleep Hours and Sex",
+    subtitle = "Interaction model: slopes are allowed to differ by sex",
+    x        = "Sleep Hours per Night",
+    y        = "Predicted Mentally Unhealthy Days",
+    color    = "Sex", fill = "Sex"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+#| label: interaction-anova-test
+# Partial F-test comparing the models with and without the interaction
+anova(m3, m4_interact) |>
+  as_tibble() |>
+  mutate(
+    Model = c("Model 3 (no interaction)", 
+              "Model 4 (sleep_hrs × sex)"),
+    across(where(is.numeric), ~ round(., 4))
+  ) |>
+  select(Model, everything()) |>
+  kable(
+    caption   = "Table 9. F-Test Comparing Models With and Without Interaction",
+    col.names = c("Model", "Res. df", "RSS", "df", "Sum of Sq", "F", "p-value"),
+    format    = "html"
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  footnote(general = "NA marks the baseline model; it is not compared with itself.")
+```
+
+::: {.callout-tip}
+## Interpretation
+
+If the interaction term is statistically significant, the slopes (effect of sleep) differ between males and females. If not significant, a model with only main effects is preferred (parsimony). Here the partial F-test gives `r fmt_p(anova(m3, m4_interact)[2, "Pr(>F)"])`, so `r if (anova(m3, m4_interact)[2, "Pr(>F)"] < 0.05) "the sleep slope differs by sex and the interaction should stay in the model" else "the data give no clear evidence that the sleep slope differs by sex, and Model 3 without the interaction is preferred"`. We'll cover interaction/effect modification formally in a dedicated lecture.
+:::
+
+### 12. The Multivariate Normal Distribution (Conceptual Bridge)
+
+Just as SLR is linked to the **bivariate normal distribution**, MLR is linked to the **multivariate normal distribution**. When all continuous variables follow a multivariate normal distribution, the conditional distribution of $Y$ given any combination of $X$s is:
+
+$$Y \mid X_1, X_2, \ldots, X_p \sim N(\beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p, \; \sigma^2_{Y|X})$$
+
+This is the population model that our sample estimates are trying to recover. The bivariate normal from the correlation lecture is simply a special case with $p = 1$.
+
+### 13. Summary of Key Takeaways
+
+| Concept | Key Point |
+|---------|-----------|
+| MLR formula | $Y_i = \beta_0 + \sum_{j=1}^p \beta_j X_{ji} + \varepsilon_i$ |
+| Partial coefficient | $\hat{\beta}_j$ = change in $E(Y)$ per 1-unit increase in $X_j$, **holding all else constant** |
+| Confounder adjustment | Achieved mathematically by including confounders as additional predictors |
+| Assumptions | LINE: Linearity, Independence, Normality, Equal variance |
+| Missing data | MCAR, MAR, MNAR: the mechanism determines the risk of bias |
+| F-test | Tests $H_0: \beta_1 = \cdots = \beta_p = 0$ (omnibus test) |
+| $R^2$ vs. Adj. $R^2$ | Use Adj. $R^2$ to compare models of different sizes |
+| Root MSE | Average prediction error in outcome units |
+
+## Part 2: In-Class Lab Activity
+
+### Instructions
+
+In this lab, you will build and interpret multiple linear regression models using the BRFSS 2020 analytic dataset. Work through each task systematically. You may discuss concepts with classmates, but your written answers and R code must be your own.
+
+[Download the lab template (.qmd)](../labs/templates/template-mlr-lab.qmd){.btn .btn-sm .btn-outline-primary download="mlr-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_MLR_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `menthlth_days` | Mentally unhealthy days in past 30 | Continuous (0–30) |
+| `physhlth_days` | Physically unhealthy days in past 30 | Continuous (0–30) |
+| `sleep_hrs` | Sleep hours per night | Continuous (1–14) |
+| `age` | Age in years (capped at 80) | Continuous |
+| `income_cat` | Household income (1 = <$10k to 8 = >$75k) | Ordinal |
+| `sex` | Sex (Male/Female) | Factor |
+| `exercise` | Any physical activity past 30 days (Yes/No) | Factor |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(ggeffects)
+library(GGally)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "INCOME2", "SEXVAR",
+           "EXERANY2", "_BMI5")
+) |>
+  janitor::clean_names()
+
+brfss_mlr <- brfss_full |>
+  mutate(
+    # Outcome: mentally unhealthy days in past 30 (88 = none = 0; 77/99 = DK/refused = NA)
+    menthlth_days = case_when(
+      menthlth == 88              ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                        ~ NA_real_
+    ),
+    # Physical health days (key predictor)
+    physhlth_days = case_when(
+      physhlth == 88              ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                        ~ NA_real_
+    ),
+    # Sleep hours (practical cap at 14)
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                        ~ NA_real_
+    ),
+    # Age (capped at 80 per BRFSS coding)
+    age = age80,
+    # Income category (ordinal 1–8)
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Exercise in past 30 days (any physical activity)
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    # BMI (stored as integer × 100 in BRFSS)
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    # Income as labeled factor (for display)
+    income_f = factor(income2, levels = 1:8,
+      labels = c("<$10k", "$10-15k", "$15-20k", "$20-25k",
+                 "$25-35k", "$35-50k", "$50-75k", ">$75k"))
+  ) |>
+  filter(
+    !is.na(menthlth_days),
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(age),   age >= 18,
+    !is.na(income_cat),
+    !is.na(sex),
+    !is.na(exercise)
+  )
+
+# ── Analytic sample (reproducible random sample) ────────────────────────────
+set.seed(553)
+brfss_mlr <- brfss_mlr |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age,
+         income_cat, income_f, sex, exercise, bmi) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Exploratory Data Analysis (15 points)
+
+**1a. (5 pts)** Create a descriptive statistics table using `tbl_summary()` that includes all variables in the dataset. Include means (SD) for continuous variables and n (%) for categorical variables.
+
+**1b. (5 pts)** Create a histogram of `menthlth_days`. Describe the shape of the distribution. Is it symmetric, right-skewed, or left-skewed? What are the implications of this shape for regression modeling?
+
+**1c. (5 pts)** Create a scatterplot matrix (using `GGally::ggpairs()` or similar) for the continuous variables: `menthlth_days`, `physhlth_days`, `sleep_hrs`, and `age`. Comment on the direction and strength of each pairwise correlation with the outcome.
+
+### Task 2: Unadjusted (Simple) Linear Regression (15 points)
+
+**2a. (5 pts)** Fit a simple linear regression model regressing `menthlth_days` on `sleep_hrs` alone. Write out the fitted regression equation.
+
+**2b. (5 pts)** Interpret the slope for sleep in a single sentence appropriate for a public health audience (no statistical jargon).
+
+**2c. (5 pts)** State the null and alternative hypotheses for the slope, report the t-statistic and p-value, and state your conclusion. What is the degree of freedom for this test?
+
+### Task 3: Building the Multivariable Model (25 points)
+
+**3a. (5 pts)** Fit three models:
+
+- **Model A:** `menthlth_days ~ sleep_hrs`
+- **Model B:** `menthlth_days ~ sleep_hrs + age + sex`
+- **Model C:** `menthlth_days ~ sleep_hrs + age + sex + physhlth_days + income_cat + exercise`
+
+**3b. (10 pts)** Create a table comparing the sleep coefficient ($\hat{\beta}$, SE, 95% CI, p-value) across Models A, B, and C. Does the sleep coefficient change substantially when you add more covariates? What does this suggest about confounding?
+
+**3c. (10 pts)** For **Model C**, write out the full fitted regression equation and interpret **every** coefficient in plain language appropriate for a public health report.
+
+### Task 4: Model Fit and ANOVA (20 points)
+
+**4a. (5 pts)** Report $R^2$ and Adjusted $R^2$ for each of the three models (A, B, C). Create a table. Which model explains the most variance in mental health days?
+
+**4b. (5 pts)** What is the Root MSE for Model C? Interpret it in practical terms: what does it tell you about prediction accuracy?
+
+**4c. (10 pts)** Using the ANOVA output for Model C, fill in the following table manually (i.e., compute the values using the output from `anova()` or `glance()`):
+
+| Source | df | SS | MS | F |
+|--------|----|----|----|----|
+| Model | ? | ? | ? | ? |
+| Residual | ? | ? | ? | |
+| Total | ? | ? | | |
+
+State the null hypothesis for the overall F-test and your conclusion.
+
+### Task 5: Residual Diagnostics (15 points)
+
+**5a. (5 pts)** For Model C, produce the four standard diagnostic plots (Residuals vs. Fitted, Normal Q-Q, Scale-Location, Residuals vs. Leverage). Comment on what each plot tells you about the LINE assumptions.
+
+**5b. (5 pts)** Given the nature of the outcome (mental health days, bounded at 0 and 30, heavily right-skewed), which assumptions are most likely to be violated? Does this invalidate the analysis? Explain.
+
+**5c. (5 pts)** Identify any observations with Cook's Distance > 1. How many are there? What would you do with them in a real analysis?
+
+### Task 6: Interpretation for a Public Health Audience (10 points)
+
+Suppose you are writing the results section of a public health paper. Write a **3–4 sentence paragraph** summarizing the findings from Model C for a non-statistical audience. Your paragraph should:
+
+- Identify which predictors were significantly associated with mental health days
+- State the direction and approximate magnitude of the most important associations
+- Appropriately caveat the cross-sectional nature of the data (no causal language)
+- Not use any statistical jargon (no "significant," "coefficient," "p-value")
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

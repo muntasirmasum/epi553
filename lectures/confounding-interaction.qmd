@@ -1,0 +1,1189 @@
+---
+title: "Confounding and Interaction"
+subtitle: "Check whether an exposure's effect differs across groups, then whether other variables distort it."
+description: "Effect modification with interaction terms and stratified models, partial F-tests for interaction, and confounding with the 10% change-in-estimate rule, using sleep and physically unhealthy days in BRFSS 2020."
+order: 9
+unit: "Linear regression"
+categories: [Linear regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- tell interaction (effect modification) apart from confounding;
+- assess interaction with stratified models and with interaction terms, and test it with t-tests and partial F-tests;
+- interpret interactions with two-level, multi-level, and continuous modifiers;
+- assess confounding with the 10% change-in-estimate rule, one covariate at a time and jointly;
+- explain why interaction is assessed before confounding and why a mediator is not a confounder.
+:::
+
+## Introduction
+
+In previous lectures, we built multiple linear regression models that included several predictors. We interpreted each coefficient as the expected change in $Y$ for a one-unit increase in $X_j$, "holding all other predictors constant." But we did not examine two critical methodological questions:
+
+1. **Confounding:** Does the estimated effect of our exposure change when we add or remove covariates? If so, those covariates are confounders, and we need them in the model to get an unbiased estimate.
+
+2. **Interaction (Effect Modification):** Is the effect of our exposure the same for everyone, or does it differ across subgroups? If the effect of sleep on physical health is different for men and women, we say that sex **modifies** the effect of sleep.
+
+These are the two most important methodological concepts in associative (etiologic) modeling, the type of modeling most common in epidemiology.
+
+**Research question for today:**
+
+> *Is the association between sleep duration and physically unhealthy days modified by sex or education? And which variables confound this association?*
+
+## Predictive vs. Associative Modeling
+
+Before we dive in, it is important to revisit the distinction between the two primary goals of regression modeling, because confounding and interaction are only relevant in one of them.
+
+| Goal | Question | What matters most |
+|------|----------|-------------------|
+| **Predictive** | Which set of variables best predicts $Y$? | Overall model accuracy ($R^2$, RMSE, out-of-sample prediction) |
+| **Associative** | What is the effect of a specific exposure on $Y$, after adjusting for confounders? | Accuracy and interpretability of a specific $\hat{\beta}$ |
+
+In **predictive** modeling, we want the combination of variables that minimizes prediction error. We do not care whether individual coefficients are "correct" or interpretable, only whether the model predicts well.
+
+In **associative** modeling, we care deeply about one (or a few) specific coefficients. We want to ensure that $\hat{\beta}_{\text{exposure}}$ reflects the true relationship, free from confounding bias. This is the setting where confounding and interaction become critical.
+
+::: {.callout-note}
+## In epidemiology, we are almost always doing associative modeling.
+
+We have a specific exposure of interest (e.g., sleep) and want to estimate its effect on a health outcome (e.g., physical health days) while controlling for confounders.
+:::
+
+### A Warning About Extrapolation
+
+We should never extrapolate predictions from a statistical model beyond the range of the observed data. Extrapolation assumes that the relationship continues unchanged into regions where we have no data, which is often false.
+
+A famous example: NASA engineers extrapolated O-ring performance data to predict behavior at temperatures colder than any previously tested. The resulting decision to launch the Space Shuttle Challenger in cold weather led to the 1986 disaster.
+
+::: {.callout-note}
+## Rule of thumb
+
+Your model is only valid within the range of the data used to build it.
+:::
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(ggeffects)
+```
+
+### Preparing the Dataset
+
+We continue with the **BRFSS 2020** dataset. For this lecture we shift our outcome to **physically unhealthy days** and examine sleep as the primary exposure, with sex, education, age, exercise, and general health as potential modifiers and confounders.
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode nine variables and draw a random sample of 5,000 adults with complete data.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the nine BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("PHYSHLTH", "SLEPTIM1", "MENTHLTH", "_AGE80", "SEXVAR", "EDUCA",
+           "EXERANY2", "GENHLTH", "INCOME2")
+) |>
+  janitor::clean_names()
+```
+
+```{r}
+#| label: prepare-data
+brfss_ci <- brfss_full |>
+  mutate(
+    # Outcome: physically unhealthy days in past 30
+    physhlth_days = case_when(
+      physhlth == 88                    ~ 0,
+      physhlth >= 1 & physhlth <= 30   ~ as.numeric(physhlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Primary exposure: sleep hours
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14   ~ as.numeric(sleptim1),
+      TRUE                             ~ NA_real_
+    ),
+    # Mentally unhealthy days (covariate)
+    menthlth_days = case_when(
+      menthlth == 88                    ~ 0,
+      menthlth >= 1 & menthlth <= 30   ~ as.numeric(menthlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Age
+    age = age80,
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Education (4-level)
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    # Exercise in past 30 days
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    # General health status
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    # Income category (ordinal 1-8)
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(menthlth_days),
+    !is.na(age), age >= 18,
+    !is.na(sex),
+    !is.na(education),
+    !is.na(exercise),
+    !is.na(gen_health),
+    !is.na(income_cat)
+  )
+
+# Reproducible random sample
+set.seed(1220)
+brfss_ci <- brfss_ci |>
+  select(physhlth_days, sleep_hrs, menthlth_days, age, sex,
+         education, exercise, gen_health, income_cat) |>
+  slice_sample(n = 5000)
+
+tibble(Metric = c("Observations", "Variables"),
+       Value  = c(nrow(brfss_ci), ncol(brfss_ci))) |>
+  kable(caption = "Analytic Dataset Dimensions") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Descriptive Statistics
+
+```{r}
+#| label: descriptive-gtsummary
+brfss_ci |>
+  select(physhlth_days, sleep_hrs, age, sex, education, exercise, gen_health) |>
+  tbl_summary(
+    label = list(
+      physhlth_days ~ "Physically unhealthy days (past 30)",
+      sleep_hrs     ~ "Sleep (hours/night)",
+      age           ~ "Age (years)",
+      sex           ~ "Sex",
+      education     ~ "Education level",
+      exercise      ~ "Any physical activity (past 30 days)",
+      gen_health    ~ "General health status"
+    ),
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 1,
+    missing = "no"
+  ) |>
+  add_n() |>
+  bold_labels() |>
+  italicize_levels() |>
+  modify_caption("Table 1. Descriptive statistics, BRFSS 2020 (n = 5,000)") |>
+  as_kable_extra()
+```
+
+**Interpretation:** The analytic sample includes 5,000 randomly selected BRFSS 2020 respondents. On average, participants reported `r round(mean(brfss_ci$physhlth_days), 1)` physically unhealthy days in the past 30 (SD = `r round(sd(brfss_ci$physhlth_days), 1)`), indicating a right-skewed distribution where most respondents report few or no unhealthy days. Mean sleep duration was `r round(mean(brfss_ci$sleep_hrs), 1)` hours per night (SD = `r round(sd(brfss_ci$sleep_hrs), 1)`), `r if (mean(brfss_ci$sleep_hrs) >= 7) "which meets" else "just below"` the CDC recommendation of 7 or more hours. The sample is `r round(mean(brfss_ci$sex == "Female") * 100, 1)`% female and is well-educated, with `r round(mean(brfss_ci$education == "College graduate") * 100, 1)`% holding a college degree. The majority (`r round(mean(brfss_ci$exercise == "Yes") * 100, 1)`%) reported engaging in physical activity in the past 30 days. These sample characteristics should be kept in mind when interpreting results, as the sample may not be representative of the general U.S. population.
+
+## Part 1: Guided Practice
+
+### 1. Interaction (Effect Modification)
+
+#### 1.1 What Is Interaction?
+
+**Interaction** (also called **effect modification**) is present when the relationship between an exposure and an outcome is **different at different levels** of a third variable. In regression terms, the slope of the exposure-outcome relationship changes depending on the value of the modifier.
+
+For example, if the effect of sleep on physical health is stronger for women than for men, then sex **modifies** the effect of sleep. The two variables (sleep and sex) have a **multiplicative**, not merely additive, effect on the outcome.
+
+This is fundamentally different from confounding:
+
+| Concept | Question | Implication |
+|---------|----------|-------------|
+| **Confounding** | Is the crude estimate of the exposure effect biased by a third variable? | Must adjust for the confounder to get a valid estimate |
+| **Interaction** | Does the effect of the exposure differ across subgroups? | Must report stratum-specific effects, not a single overall estimate |
+
+::: {.callout-note}
+## Critical point
+
+Always assess interaction **before** confounding. If interaction is present, a single "adjusted" coefficient for the exposure is misleading because the effect is not the same for everyone. You must stratify or include interaction terms.
+:::
+
+#### 1.2 Interaction Between a Continuous and a Dichotomous Variable
+
+Consider a model with a continuous exposure $X_1$ (sleep hours) and a dichotomous variable $X_2$ (sex, where Female = 1 and Male = 0, the same coding R uses in Section 3):
+
+$$Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \beta_3 X_1 X_2 + \varepsilon$$
+
+The term $\beta_3 X_1 X_2$ is the **interaction term**. Let's see what happens when we plug in the values for each group:
+
+**For females** ($X_2 = 1$):
+$$E(Y | X_1, \text{Female}) = (\beta_0 + \beta_2) + (\beta_1 + \beta_3) X_1$$
+
+**For males** ($X_2 = 0$):
+$$E(Y | X_1, \text{Male}) = \beta_0 + \beta_1 X_1$$
+
+The key insight:
+
+- The **intercept** for females is $\beta_0 + \beta_2$, while for males it is $\beta_0$
+- The **slope** for females is $\beta_1 + \beta_3$, while for males it is $\beta_1$
+- $\beta_3$ is the **difference in slopes** (females minus males)
+
+If $\beta_3 = 0$, the slopes are equal and the lines are **parallel** (no interaction). If $\beta_3 \neq 0$, the lines are **not parallel** (interaction is present).
+
+```{r}
+#| label: interaction-concept-viz
+#| fig-alt: "Two scatter plots of simulated data with a fitted line for each of two groups. Left, titled No Interaction, the Group A (red) and Group B (blue) lines are parallel with the same slope, Group B about 3 units higher. Right, titled Interaction Present, Group A rises steeply while Group B is nearly flat, so the lines cross near X1 = 3."
+#| fig-cap: No Interaction (Parallel Lines) vs. Interaction (Non-Parallel Lines)
+# Create synthetic data to illustrate the concept
+set.seed(1220)
+n <- 200
+concept_data <- tibble(
+  x1 = runif(n, 0, 10),
+  group = rep(c("Group A", "Group B"), each = n / 2)
+)
+
+# No interaction: same slope, different intercepts
+no_int <- concept_data |>
+  mutate(
+    y = ifelse(group == "Group A", 2 + 1.5 * x1, 5 + 1.5 * x1) + rnorm(n, 0, 2)
+  )
+
+# Interaction: different slopes
+with_int <- concept_data |>
+  mutate(
+    y = ifelse(group == "Group A", 2 + 1.5 * x1, 5 + 0.3 * x1) + rnorm(n, 0, 2)
+  )
+
+p1 <- ggplot(no_int, aes(x = x1, y = y, color = group)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  labs(title = "No Interaction", subtitle = "Parallel lines: same slope",
+       x = expression(X[1]), y = "Y") +
+  theme_minimal(base_size = 12) +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "bottom")
+
+p2 <- ggplot(with_int, aes(x = x1, y = y, color = group)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  labs(title = "Interaction Present", subtitle = "Non-parallel lines: different slopes",
+       x = expression(X[1]), y = "Y") +
+  theme_minimal(base_size = 12) +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "bottom")
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+**Interpretation:** The left panel illustrates **no interaction**: both groups have the same slope (1.5), so the lines are perfectly parallel. The group variable shifts the intercept (Group B starts higher) but does not change the rate at which $Y$ increases with $X_1$. In this scenario, a single slope coefficient adequately describes the $X_1$-$Y$ relationship for both groups. The right panel illustrates **interaction**: Group A has a steep slope (1.5) while Group B has a shallow slope (0.3). The non-parallel lines mean that the effect of $X_1$ on $Y$ depends on which group you belong to, and a single pooled slope would misrepresent the relationship for both groups. This is the visual test for interaction: **parallel lines = no interaction; non-parallel lines = interaction.**
+
+### 2. Testing for Interaction: Stratified Analysis
+
+#### 2.1 The Stratified Approach
+
+One way to assess interaction is to **split the data** by levels of the potential modifier and fit separate regression models in each stratum. If the slopes differ meaningfully, interaction may be present.
+
+Let's test whether the association between sleep and physical health days differs by sex.
+
+```{r}
+#| label: stratified-analysis
+# Fit separate models for males and females
+mod_male <- lm(physhlth_days ~ sleep_hrs, data = brfss_ci |> filter(sex == "Male"))
+mod_female <- lm(physhlth_days ~ sleep_hrs, data = brfss_ci |> filter(sex == "Female"))
+
+# Compare coefficients
+bind_rows(
+  tidy(mod_male, conf.int = TRUE) |> mutate(Stratum = "Male"),
+  tidy(mod_female, conf.int = TRUE) |> mutate(Stratum = "Female")
+) |>
+  filter(term == "sleep_hrs") |>
+  select(Stratum, estimate, std.error, conf.low, conf.high, p.value) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Stratified Analysis: Sleep → Physical Health Days, by Sex",
+    col.names = c("Stratum", "Estimate", "SE", "CI Lower", "CI Upper", "p-value")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** The stratified analysis reveals that the sleep-physical health association is negative in both groups: among males, each additional hour of sleep is associated with approximately `r round(abs(coef(mod_male)["sleep_hrs"]), 2)` fewer physically unhealthy days, while among females the association is `r if (abs(coef(mod_female)["sleep_hrs"]) < abs(coef(mod_male)["sleep_hrs"])) "weaker" else "stronger"` at approximately `r round(abs(coef(mod_female)["sleep_hrs"]), 2)` fewer days per additional hour. `r p_m <- coef(summary(mod_male))["sleep_hrs", 4]; p_f <- coef(summary(mod_female))["sleep_hrs", 4]; if (p_m < 0.05 && p_f < 0.05) "Both estimates are statistically significant" else "Not both estimates are statistically significant"` (`r fmt_p(p_m)` for males, `r fmt_p(p_f)` for females). The slopes appear to differ in magnitude, suggesting that the protective association of sleep with physical health may be somewhat stronger for `r if (abs(coef(mod_male)["sleep_hrs"]) > abs(coef(mod_female)["sleep_hrs"])) "males than females" else "females than males"`. However, before concluding that interaction is present, we need a formal statistical test, which we will conduct using an interaction term in Section 3.
+
+```{r}
+#| label: stratified-plot
+#| fig-alt: !expr sprintf("Jittered scatter plot of physically unhealthy days against sleep hours, colored by sex, with a fitted line and gray 95%% band for each sex. Points pile up at 0 days and form bands at 5, 10, 15, 20, and 30 days. Both lines slope gently downward (%.2f days per hour for men and %.2f for women), and their bands overlap almost entirely.", coef(mod_male)["sleep_hrs"], coef(mod_female)["sleep_hrs"])
+#| fig-cap: 'Stratified Regression: Sleep vs. Physical Health Days by Sex'
+ggplot(brfss_ci, aes(x = sleep_hrs, y = physhlth_days, color = sex)) +
+  geom_jitter(alpha = 0.08, width = 0.3, height = 0.3, size = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 1.2) +
+  labs(
+    title    = "Association Between Sleep and Physical Health Days, Stratified by Sex",
+    subtitle = "Are the slopes parallel or different?",
+    x        = "Sleep Hours per Night",
+    y        = "Physically Unhealthy Days (Past 30)",
+    color    = "Sex"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Set1")
+```
+
+**Interpretation:** The plot shows both regression lines sloping downward, confirming the negative association between sleep and physically unhealthy days for both sexes. The `r if (abs(coef(mod_male)["sleep_hrs"]) > abs(coef(mod_female)["sleep_hrs"])) "male" else "female"` regression line (steeper slope) suggests a stronger protective association of sleep than the other line. However, the confidence bands overlap substantially, which hints that the difference in slopes may not be statistically significant. The jittered points also reveal the highly skewed nature of the outcome: most respondents cluster near zero unhealthy days regardless of sleep duration, with a long tail of individuals reporting many unhealthy days.
+
+#### 2.2 Limitations of Stratified Analysis
+
+The stratified approach is intuitive and visually compelling, but it has important limitations:
+
+1. **No formal test:** We can see the slopes are different, but we cannot compute a p-value for the difference without additional machinery
+2. **Reduced power:** Each stratum has fewer observations than the full dataset
+3. **Multiple comparisons:** With $k$ strata, we would need $k$ separate models
+4. **Cannot adjust for covariates easily** while testing the interaction
+
+The solution is to use a single regression model with an **interaction term**.
+
+### 3. Testing for Interaction: Regression with Interaction Terms
+
+#### 3.1 The Interaction Model in R
+
+R provides two operators for specifying interactions:
+
+- **`X1:X2`** includes **only** the interaction term $X_1 \times X_2$
+- **`X1*X2`** is shorthand for `X1 + X2 + X1:X2` (main effects **plus** interaction)
+
+::: {.callout-note}
+## Rule
+
+Any model with an interaction term must also include the main effects that comprise the interaction. Always use `*` or explicitly include both main effects with `:`.
+:::
+
+```{r}
+#| label: interaction-model
+# Model without interaction (additive model)
+mod_add <- lm(physhlth_days ~ sleep_hrs + sex, data = brfss_ci)
+
+# Model with interaction
+mod_int <- lm(physhlth_days ~ sleep_hrs * sex, data = brfss_ci)
+# Equivalent to: lm(physhlth_days ~ sleep_hrs + sex + sleep_hrs:sex, data = brfss_ci)
+
+tidy(mod_int, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Interaction Model: Sleep * Sex → Physical Health Days",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: extract-int-coefs
+b_int <- round(coef(mod_int), 3)
+```
+
+#### 3.2 Interpreting the Interaction Model
+
+The fitted model is:
+
+$$\widehat{\text{Phys Days}} = `r b_int[1]` `r pm(b_int[2])`(\text{Sleep}) `r pm(b_int[3])`(\text{Female}) `r pm(b_int[4])`(\text{Sleep} \times \text{Female})$$
+
+**For males** (Female = 0):
+$$\widehat{\text{Phys Days}} = `r b_int[1]` `r pm(b_int[2])`(\text{Sleep})$$
+
+**For females** (Female = 1):
+$$\widehat{\text{Phys Days}} = (`r b_int[1]` `r pm(b_int[3])`) + (`r b_int[2]` `r pm(b_int[4])`)(\text{Sleep}) = `r b_int[1] + b_int[3]` `r pm(b_int[2] + b_int[4])`(\text{Sleep})$$
+
+**Interpretation of each coefficient:**
+
+- **Intercept (`r b_int[1]`):** Expected physical health days for a male with 0 hours of sleep (extrapolation, not meaningful)
+- **Sleep (`r b_int[2]`):** The slope of sleep for **males** (the reference group for sex). Each additional hour of sleep is associated with `r abs(b_int[2])` `r ifelse(b_int[2] < 0, "fewer", "more")` physically unhealthy days among males.
+- **Female (`r b_int[3]`):** The difference in intercept between females and males (the difference in expected physical health days at sleep = 0, which is an extrapolation)
+- **Sleep:Female (`r b_int[4]`):** The **difference in slopes** between females and males. This is the interaction term. It tells us how much more (or less) the sleep effect is for females compared to males.
+
+#### 3.3 Testing for Interaction (Parallelism)
+
+The formal test for interaction is simply the t-test for the interaction coefficient:
+
+$$H_0: \beta_3 = 0 \quad \text{(slopes are equal, lines are parallel, no interaction)}$$
+$$H_A: \beta_3 \neq 0 \quad \text{(slopes differ, interaction is present)}$$
+
+```{r}
+#| label: test-interaction
+int_term <- tidy(mod_int) |> filter(term == "sleep_hrs:sexFemale")
+cat("Interaction term (sleep_hrs:sexFemale):\n")
+cat("  Estimate:", round(int_term$estimate, 4), "\n")
+cat("  t-statistic:", round(int_term$statistic, 3), "\n")
+cat("  p-value:", round(int_term$p.value, 4), "\n")
+```
+
+**Interpretation:** The interaction term (`sleep_hrs:sexFemale`) has a coefficient of `r round(int_term$estimate, 4)`, with a t-statistic of `r round(int_term$statistic, 3)` and p-value of `r round(int_term$p.value, 4)`. `r if (int_term$p.value >= 0.05) "Since the p-value exceeds the conventional $\\alpha = 0.05$ threshold, we fail to reject the null hypothesis that the slopes are equal. In other words, **there is no statistically significant evidence that the association between sleep and physically unhealthy days differs by sex.**" else "Since the p-value is below 0.05, we reject the null hypothesis that the slopes are equal: the association between sleep and physically unhealthy days differs by sex."` The `r if (int_term$estimate > 0) "positive" else "negative"` sign of the interaction coefficient suggests the sleep effect is slightly `r if (int_term$estimate > 0) "less" else "more"` protective for females`r if (int_term$p.value >= 0.05) ", but this difference is not distinguishable from chance in this sample. Therefore, a single (pooled) sleep coefficient may be appropriate for both sexes" else ""`.
+
+#### 3.4 Testing for Coincidence
+
+A stronger test asks whether sex has **any** effect on the relationship (neither intercept nor slope differs):
+
+$$H_0: \beta_2 = \beta_3 = 0 \quad \text{(the two lines are identical)}$$
+$$H_A: \text{At least one } \neq 0 \quad \text{(the lines differ in intercept and/or slope)}$$
+
+This is a partial F-test comparing the interaction model to a model with only sleep:
+
+```{r}
+#| label: test-coincidence
+mod_sleep_only <- lm(physhlth_days ~ sleep_hrs, data = brfss_ci)
+
+anova(mod_sleep_only, mod_int) |>
+  tidy() |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(caption = "Test for Coincidence: Does Sex Affect the Sleep-Physical Health Relationship at All?") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** The partial F-test evaluates whether sex contributes *anything* to the model (either through a different intercept, a different slope, or both). The F-statistic is `r round(anova(mod_sleep_only, mod_int)$F[2], 2)` with a p-value of `r round(anova(mod_sleep_only, mod_int)$"Pr(>F)"[2], 4)`. `r p_coin <- anova(mod_sleep_only, mod_int)$"Pr(>F)"[2]; if (p_coin >= 0.05) "Since p > 0.05, we fail to reject the null hypothesis that the two sex-specific regression lines are identical. This means that, in this unadjusted model, sex does not significantly change either the baseline level or the slope of the sleep-physical health relationship." else "Since p < 0.05, we reject the null hypothesis that the two sex-specific regression lines are identical: the lines differ in intercept, slope, or both."` The test for coincidence is more comprehensive than the parallelism test (Section 3.3), because it simultaneously evaluates both the intercept difference ($\beta_2$) and the slope difference ($\beta_3$).
+
+#### 3.5 Verifying Equivalence with Stratified Analysis
+
+The interaction model recovers exactly the same stratum-specific equations as the stratified analysis:
+
+```{r}
+#| label: verify-stratified
+tribble(
+  ~Method, ~Stratum, ~Intercept, ~Slope,
+  "Stratified", "Male",
+    round(coef(mod_male)[1], 3), round(coef(mod_male)[2], 3),
+  "Stratified", "Female",
+    round(coef(mod_female)[1], 3), round(coef(mod_female)[2], 3),
+  "Interaction model", "Male",
+    round(b_int[1], 3), round(b_int[2], 3),
+  "Interaction model", "Female",
+    round(b_int[1] + b_int[3], 3), round(b_int[2] + b_int[4], 3)
+) |>
+  kable(caption = "Verification: Stratified Analysis = Interaction Model") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-note}
+The interaction model and the stratified analysis give identical stratum-specific equations. The advantage of the interaction model is that it provides a **formal test** of the difference between slopes and allows adjustment for additional covariates.
+:::
+
+```{r}
+#| label: interaction-viz
+#| fig-alt: !expr sprintf("Predicted physically unhealthy days against sleep hours (3 to 12) from the sleep by sex interaction model, with a 95%% band for each sex. Both lines fall with more sleep; the male line is steeper, so the lines cross near %.1f hours and the female line is %.1f days higher at 12 hours. The bands overlap across the whole range.", -b_int[3] / b_int[4], b_int[3] + b_int[4] * 12)
+#| fig-cap: 'Interaction Model: Predicted Physical Health Days by Sleep and Sex'
+pred_int <- ggpredict(mod_int, terms = c("sleep_hrs [3:12]", "sex"))
+
+ggplot(pred_int, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.12, color = NA) +
+  labs(
+    title    = "Predicted Physical Health Days by Sleep Duration and Sex",
+    subtitle = "From interaction model: sleep_hrs * sex",
+    x        = "Sleep Hours per Night",
+    y        = "Predicted Physically Unhealthy Days",
+    color    = "Sex",
+    fill     = "Sex"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+**Interpretation:** The predicted values plot shows what the formal test found: the regression lines for males and females are not far from parallel, and their confidence bands overlap broadly. Both groups show a decline in predicted physically unhealthy days as sleep duration increases from 3 to 12 hours. Because the `r if (abs(b_int[2]) > abs(b_int[2] + b_int[4])) "male" else "female"` slope is steeper, the lines cross near `r round(-b_int[3] / b_int[4], 1)` hours of sleep; at 12 hours the female line sits `r if (b_int[3] + b_int[4] * 12 > 0) "above" else "below"` the male line, by `r round(abs(b_int[3] + b_int[4] * 12), 1)` days. The difference in slopes is modest and `r if (int_term$p.value >= 0.05) "not statistically significant" else "statistically significant"` (`r fmt_p(int_term$p.value)`). `r if (int_term$p.value >= 0.05) "This visualization reinforces the conclusion that sex does not meaningfully modify the sleep-physical health association in this sample." else ""`
+
+### 4. Interactions with Categorical Variables (k > 2)
+
+#### 4.1 Multiple Interaction Terms
+
+When the modifier has $k > 2$ categories (such as education with 4 levels), the interaction between a continuous exposure and the categorical modifier requires $k - 1$ interaction terms, one for each dummy variable.
+
+For sleep $\times$ education (with "Less than HS" as reference):
+
+$$Y = \beta_0 + \beta_1(\text{Sleep}) + \beta_2(\text{HS grad}) + \beta_3(\text{Some college}) + \beta_4(\text{College grad}) + \beta_5(\text{Sleep} \times \text{HS grad}) + \beta_6(\text{Sleep} \times \text{Some college}) + \beta_7(\text{Sleep} \times \text{College grad}) + \varepsilon$$
+
+Each interaction coefficient $\beta_5, \beta_6, \beta_7$ represents the difference in the sleep slope between that education group and the reference group.
+
+```{r}
+#| label: interaction-categorical
+mod_int_educ <- lm(physhlth_days ~ sleep_hrs * education, data = brfss_ci)
+
+tidy(mod_int_educ, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Interaction Model: Sleep * Education → Physical Health Days",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** This model produces three interaction terms, one for each education level compared to the reference category ("Less than HS"). The reference group slope for sleep is `r round(coef(mod_int_educ)["sleep_hrs"], 3)`, meaning that among those with less than a high school education, each additional hour of sleep is associated with approximately `r round(abs(coef(mod_int_educ)["sleep_hrs"]), 2)` fewer physically unhealthy days. `r ce <- coef(summary(mod_int_educ)); hs <- ce["sleep_hrs:educationHS graduate", ]; sc <- ce["sleep_hrs:educationSome college", ]; cg <- ce["sleep_hrs:educationCollege graduate", ]; paste0("The interaction terms for \"HS graduate\" (", round(hs[1], 3), ", ", fmt_p(hs[4]), ") and \"Some college\" (", round(sc[1], 3), ", ", fmt_p(sc[4]), ") are ", if (hs[1] > 0 && sc[1] > 0) "positive" else "of mixed sign", if (hs[4] >= 0.05 && sc[4] >= 0.05) " but not individually significant, indicating their slopes do not significantly differ from the reference group" else ", and at least one is individually significant", ". The interaction term for \"College graduate\" (", round(cg[1], 3), ", ", fmt_p(cg[4]), ") ", if (cg[4] < 0.05) "is statistically significant," else "is not statistically significant either;")` suggesting that the protective effect of sleep is notably weaker among college graduates (slope $\approx$ `r round(coef(mod_int_educ)["sleep_hrs"] + coef(mod_int_educ)["sleep_hrs:educationCollege graduate"], 3)`) compared to those with less than a high school education. This pattern makes substantive sense: individuals with lower education may experience more physically demanding occupations or fewer health resources, amplifying the consequences of insufficient sleep.
+
+#### 4.2 Testing the Overall Interaction with a Partial F-Test
+
+Individual t-tests for each interaction term may be non-significant, yet the interaction as a whole could be meaningful. To test whether sleep $\times$ education is significant overall, we use a partial F-test comparing the model with and without the interaction terms:
+
+$$H_0: \beta_5 = \beta_6 = \beta_7 = 0 \quad \text{(the sleep slope is the same across all education levels)}$$
+
+```{r}
+#| label: f-test-interaction-educ
+mod_no_int_educ <- lm(physhlth_days ~ sleep_hrs + education, data = brfss_ci)
+
+anova(mod_no_int_educ, mod_int_educ) |>
+  tidy() |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(caption = "Partial F-test: Is the Sleep x Education Interaction Significant?") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** The partial F-test evaluates all three interaction terms simultaneously ($H_0: \beta_5 = \beta_6 = \beta_7 = 0$). The F-statistic is `r round(anova(mod_no_int_educ, mod_int_educ)$F[2], 2)` with a p-value of `r round(anova(mod_no_int_educ, mod_int_educ)$"Pr(>F)"[2], 4)`. At $\alpha = 0.05$, the overall interaction is `r if (anova(mod_no_int_educ, mod_int_educ)$"Pr(>F)"[2] >= 0.05) "not statistically significant, meaning we do not have sufficient evidence to conclude that the sleep slope differs across education levels as a whole" else "statistically significant"`. `r if (coef(summary(mod_int_educ))["sleep_hrs:educationCollege graduate", 4] < 0.05 && anova(mod_no_int_educ, mod_int_educ)$"Pr(>F)"[2] >= 0.05) "Note the discrepancy:" else "Compare the two tests:"` the individual t-test for the "College graduate" interaction term gave `r fmt_p(coef(summary(mod_int_educ))["sleep_hrs:educationCollege graduate", 4])`, while the omnibus F-test gave `r fmt_p(anova(mod_no_int_educ, mod_int_educ)$"Pr(>F)"[2])`. This can occur when one group drives the difference while others do not. In practice, if there is strong a priori reason to expect education-based effect modification, this borderline result may warrant further investigation in a larger sample.
+
+```{r}
+#| label: interaction-educ-viz
+#| fig-alt: !expr local({b <- coef(mod_int_educ); sl <- b["sleep_hrs"] + c(0, b["sleep_hrs:educationHS graduate"], b["sleep_hrs:educationSome college"], b["sleep_hrs:educationCollege graduate"]); sprintf("Predicted physically unhealthy days against sleep hours (3 to 12) for four education levels, with 95%% bands. Less than high school starts highest and falls most steeply (slope %.2f); high school graduate (%.2f) and some college (%.2f) fall less; college graduate is nearly flat (%.2f). The lines converge as sleep increases, but at 12 hours less than high school is still highest, and its band is very wide.", sl[1], sl[2], sl[3], sl[4])})
+#| fig-cap: 'Interaction: Sleep Effect by Education Level'
+pred_int_educ <- ggpredict(mod_int_educ, terms = c("sleep_hrs [3:12]", "education"))
+
+ggplot(pred_int_educ, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1.1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.1, color = NA) +
+  labs(
+    title    = "Predicted Physical Health Days by Sleep and Education",
+    subtitle = "Are the lines parallel? Non-parallel lines indicate interaction.",
+    x        = "Sleep Hours per Night",
+    y        = "Predicted Physically Unhealthy Days",
+    color    = "Education",
+    fill     = "Education"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2")
+```
+
+**Interpretation:** The plot shows four regression lines, one for each education level. The "Less than HS" group has the steepest downward slope, while the "College graduate" line is noticeably flatter. The "HS graduate" and "Some college" lines fall in between. This visual pattern aligns with the regression results: the protective association between sleep and physical health is strongest among those with the least education and weakest among college graduates. At low sleep durations (3-4 hours), the education groups show the widest disparity in predicted unhealthy days, with the "Less than HS" group predicted to have the most. As sleep increases, the lines converge somewhat. Despite the borderline omnibus F-test, the visual evidence of non-parallel lines, particularly for college graduates, reinforces the potential for education-based effect modification.
+
+### 5. Continuous × Continuous Interactions
+
+#### 5.1 When Both Variables Are Continuous
+
+Interaction is not limited to categorical modifiers. We can also examine whether the effect of one continuous predictor changes across values of another continuous predictor. For example, does the sleep-physical health association differ by age?
+
+$$Y = \beta_0 + \beta_1(\text{Sleep}) + \beta_2(\text{Age}) + \beta_3(\text{Sleep} \times \text{Age}) + \varepsilon$$
+
+Here, $\beta_3$ tells us how the slope of sleep changes for each one-year increase in age:
+
+- The slope of sleep for a person of age $a$ is: $\beta_1 + \beta_3 \cdot a$
+- Because the sleep slope here is negative, a **positive** $\beta_3$ makes the slope less negative as age increases: the protective association of sleep **weakens** with age
+- A **negative** $\beta_3$ makes the slope more negative as age increases: the protective association **strengthens** with age
+
+```{r}
+#| label: continuous-interaction
+mod_int_cont <- lm(physhlth_days ~ sleep_hrs * age, data = brfss_ci)
+
+tidy(mod_int_cont, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Continuous Interaction: Sleep * Age → Physical Health Days",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** The interaction term `sleep_hrs:age` has a coefficient of `r round(coef(mod_int_cont)["sleep_hrs:age"], 4)` (`r fmt_p(summary(mod_int_cont)$coefficients["sleep_hrs:age", "Pr(>|t|)"])`), which is `r if (summary(mod_int_cont)$coefficients["sleep_hrs:age", "Pr(>|t|)"] < 0.05) "statistically significant" else "not statistically significant"`. This `r if (coef(mod_int_cont)["sleep_hrs:age"] > 0) "positive" else "negative"` coefficient means that the protective effect of sleep **`r if (coef(mod_int_cont)["sleep_hrs:age"] > 0) "weakens" else "strengthens"`** as age increases. Specifically, for each one-year increase in age, the slope of sleep becomes `r round(abs(coef(mod_int_cont)["sleep_hrs:age"]), 3)` units `r if (coef(mod_int_cont)["sleep_hrs:age"] > 0) "less negative (closer to zero)" else "more negative"`. To illustrate: the predicted slope of sleep for a 30-year-old is $`r round(coef(mod_int_cont)["sleep_hrs"], 3)` `r pm(round(coef(mod_int_cont)["sleep_hrs:age"], 3))` \times 30 = `r round(coef(mod_int_cont)["sleep_hrs"] + coef(mod_int_cont)["sleep_hrs:age"] * 30, 3)`$, while for a 70-year-old it is $`r round(coef(mod_int_cont)["sleep_hrs"], 3)` `r pm(round(coef(mod_int_cont)["sleep_hrs:age"], 3))` \times 70 = `r round(coef(mod_int_cont)["sleep_hrs"] + coef(mod_int_cont)["sleep_hrs:age"] * 70, 3)`$. In substantive terms, sleep appears to have a stronger protective association with physical health among younger adults than among older adults.
+
+#### 5.2 Visualizing Continuous Interactions
+
+With continuous modifiers, we visualize the interaction by plotting the predicted relationship at specific values of the modifier (e.g., age = 30, 50, 70):
+
+```{r}
+#| label: continuous-interaction-viz
+#| fig-alt: !expr local({bc <- coef(mod_int_cont); sprintf("Predicted physically unhealthy days against sleep hours (3 to 12) at ages 30, 50, and 70, with 95%% bands. The lines nearly meet at about %.1f hours and fan out as sleep increases; the age 30 line is steepest and falls below zero at long sleep, while the age 70 line is the flattest.", -bc["age"] / bc["sleep_hrs:age"])})
+#| fig-cap: 'Interaction: Sleep Effect at Different Ages'
+pred_cont <- ggpredict(mod_int_cont, terms = c("sleep_hrs [3:12]", "age [30, 50, 70]"))
+
+ggplot(pred_cont, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.12, color = NA) +
+  labs(
+    title    = "Predicted Physical Health Days by Sleep, at Different Ages",
+    subtitle = "Does the sleep-health relationship change with age?",
+    x        = "Sleep Hours per Night",
+    y        = "Predicted Physically Unhealthy Days",
+    color    = "Age",
+    fill     = "Age"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2")
+```
+
+::: {.callout-note}
+If the lines are approximately parallel, age does not modify the sleep effect. If they fan out or converge, the interaction is meaningful.
+:::
+
+**Interpretation:** `r bc <- coef(mod_int_cont); s_meet <- -bc["age"] / bc["sleep_hrs:age"]; s_zero <- -(bc[1] + 30 * bc["age"]) / (bc["sleep_hrs"] + 30 * bc["sleep_hrs:age"]); paste0("The three age-specific lines nearly meet at about ", round(s_meet, 1), " hours of sleep and fan out as sleep increases", if (summary(mod_int_cont)$coefficients["sleep_hrs:age", 4] < 0.05) ", which is what a statistically significant interaction looks like." else ".")` The line for 30-year-olds has the steepest negative slope, indicating that younger adults experience the largest reduction in physically unhealthy days per additional hour of sleep. The line for 70-year-olds is notably flatter, suggesting that sleep duration has a weaker association with physical health among older adults. The line for 30-year-olds even drops below zero beyond about `r round(s_zero, 1)` hours, an impossible value: a reminder of the warning about extrapolation, since a straight-line model can predict outside the possible range where data are sparse. One possible explanation is that older adults accumulate physically unhealthy days from age-related conditions (e.g., arthritis, cardiovascular disease) that are less modifiable by sleep alone, whereas younger adults' physical health may be more responsive to behavioral factors like sleep.
+
+### 6. Confounding
+
+#### 6.1 What Is Confounding?
+
+**Confounding** exists when the estimated association between an exposure and an outcome is distorted because of a third variable that is related to both. When confounding is present, ignoring the confounder leads to a biased estimate of the exposure effect.
+
+For a variable to be a confounder, it must satisfy **three conditions**:
+
+1. **Associated with the exposure** (sleep hours)
+2. **Associated with the outcome** (physical health days), even in the absence of the exposure
+3. **Not on the causal pathway** from exposure to outcome (i.e., not a mediator)
+
+```{r}
+#| label: confounder-diagram
+#| fig-alt: "Diagram of confounding with three boxes. Confounder (Age) at the top has arrows pointing to Exposure (Sleep) at the lower left and to Outcome (Physical health days) at the lower right, and an arrow runs from Exposure to Outcome."
+#| echo: false
+#| fig-cap: 'Confounding Structure: The Confounder Affects Both Exposure and Outcome'
+#| fig-width: 6
+#| fig-height: 3
+# Simple DAG-like diagram using ggplot
+dag_data <- tibble(
+  x = c(0, 2, 1),
+  y = c(0, 0, 1.2),
+  label = c("Exposure\n(Sleep)", "Outcome\n(Phys. Health Days)", "Confounder\n(Age)")
+)
+
+dag_arrows <- tibble(
+  x = c(0.42, 0.85, 1.15),
+  xend = c(1.45, 0.15, 1.85),
+  y = c(0, 1.0, 1.0),
+  yend = c(0, 0.15, 0.15)
+)
+
+ggplot() +
+  geom_segment(data = dag_arrows, aes(x = x, xend = xend, y = y, yend = yend),
+               arrow = arrow(length = unit(0.2, "cm"), type = "closed"),
+               linewidth = 0.8, color = "gray30") +
+  geom_label(data = dag_data, aes(x = x, y = y, label = label),
+             size = 3.5, fill = "white", label.padding = unit(0.4, "lines")) +
+  xlim(-0.5, 2.5) + ylim(-0.3, 1.6) +
+  theme_void()
+```
+
+**Age** is a classic confounder of the sleep-physical health relationship:
+
+- Age is associated with sleep: in these data older adults sleep slightly **more** (correlation `r round(cor(brfss_ci$age, brfss_ci$sleep_hrs), 2)`), so age is associated with the exposure
+- Older adults have more physically unhealthy days (associated with outcome)
+- Age is not caused by sleep or physical health (not on the causal pathway)
+
+#### 6.2 Detecting Confounding: The 10% Change-in-Estimate Rule
+
+The standard approach in epidemiology is to compare the **crude** (unadjusted) estimate to the **adjusted** estimate:
+
+1. Fit the crude model: $Y = \beta_0 + \beta_1 X_1$
+2. Fit the adjusted model: $Y = \beta_0^* + \beta_1^* X_1 + \beta_2^* X_2$
+3. Compute the percent change: $\frac{|\beta_1 - \beta_1^*|}{|\beta_1|} \times 100\%$
+4. If the change exceeds **10%**, $X_2$ is a confounder and should be included in the model
+
+::: {.callout-important}
+## Important
+
+This is a rule of thumb, not a rigid cutoff. The 10% threshold is conventional, not absolute. Some researchers use 5% or 15% depending on context.
+:::
+
+#### 6.3 Confounding Example: Is Age a Confounder?
+
+```{r}
+#| label: confounding-example
+# Crude model: sleep → physical health days
+mod_crude <- lm(physhlth_days ~ sleep_hrs, data = brfss_ci)
+
+# Adjusted model: adding age
+mod_adj_age <- lm(physhlth_days ~ sleep_hrs + age, data = brfss_ci)
+
+# Extract sleep coefficients
+b_crude <- coef(mod_crude)["sleep_hrs"]
+b_adj   <- coef(mod_adj_age)["sleep_hrs"]
+pct_change <- abs(b_crude - b_adj) / abs(b_crude) * 100
+
+tribble(
+  ~Model, ~`Sleep β`, ~SE, ~`95% CI`,
+  "Crude (sleep only)",
+    round(b_crude, 4),
+    round(tidy(mod_crude) |> filter(term == "sleep_hrs") |> pull(std.error), 4),
+    paste0("(", round(confint(mod_crude)["sleep_hrs", 1], 4), ", ",
+           round(confint(mod_crude)["sleep_hrs", 2], 4), ")"),
+  "Adjusted (+ age)",
+    round(b_adj, 4),
+    round(tidy(mod_adj_age) |> filter(term == "sleep_hrs") |> pull(std.error), 4),
+    paste0("(", round(confint(mod_adj_age)["sleep_hrs", 1], 4), ", ",
+           round(confint(mod_adj_age)["sleep_hrs", 2], 4), ")")
+) |>
+  kable(caption = "Confounding Assessment: Does Age Confound the Sleep-Physical Health Association?") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+cat("\nPercent change in sleep coefficient when adding age:", round(pct_change, 1), "%\n")
+cat("10% rule threshold: |", round(b_adj, 4), "| should fall within (",
+    round(b_crude * 0.9, 4), ",", round(b_crude * 1.1, 4), ")\n")
+```
+
+**Interpretation:** The crude (unadjusted) estimate for sleep is `r round(b_crude, 4)`, meaning that without controlling for any covariates, each additional hour of sleep is associated with approximately `r round(abs(b_crude), 2)` fewer physically unhealthy days. After adjusting for age, the sleep coefficient changes to `r round(b_adj, 4)`, a `r round(pct_change, 1)`% change. Because this `r if (pct_change > 10) "exceeds" else "does not exceed"` the 10% threshold, **age `r if (pct_change > 10) "is" else "is not"` a confounder** of the sleep-physical health association. Notice that the adjusted estimate is *more negative* than the crude estimate. This means that confounding by age was **attenuating** the sleep effect (making it look weaker than it truly is). This occurs because age is positively associated with both the exposure (older adults sleep slightly more) and the outcome (older adults have more unhealthy days), creating a positive confounding bias that partially masks the negative sleep-health association. After removing this bias by adjusting for age, the estimated protective effect of sleep becomes stronger.
+
+#### 6.4 Systematic Confounding Assessment
+
+In practice, we assess multiple potential confounders. Let's evaluate age, exercise, education, and general health:
+
+```{r}
+#| label: systematic-confounding
+# Crude model
+b_crude_val <- coef(mod_crude)["sleep_hrs"]
+
+# One-at-a-time adjusted models
+confounders <- list(
+  "Age"             = lm(physhlth_days ~ sleep_hrs + age, data = brfss_ci),
+  "Exercise"        = lm(physhlth_days ~ sleep_hrs + exercise, data = brfss_ci),
+  "Education"       = lm(physhlth_days ~ sleep_hrs + education, data = brfss_ci),
+  "General health"  = lm(physhlth_days ~ sleep_hrs + gen_health, data = brfss_ci),
+  "Sex"             = lm(physhlth_days ~ sleep_hrs + sex, data = brfss_ci),
+  "Income"          = lm(physhlth_days ~ sleep_hrs + income_cat, data = brfss_ci)
+)
+
+conf_table <- map_dfr(names(confounders), \(name) {
+  mod <- confounders[[name]]
+  b_adj_val <- coef(mod)["sleep_hrs"]
+  tibble(
+    Covariate = name,
+    `Crude β (sleep)` = round(b_crude_val, 4),
+    `Adjusted β (sleep)` = round(b_adj_val, 4),
+    `% Change` = round(abs(b_crude_val - b_adj_val) / abs(b_crude_val) * 100, 1),
+    Confounder = ifelse(abs(b_crude_val - b_adj_val) / abs(b_crude_val) * 100 > 10,
+                        "Yes (>10%)", "No")
+  )
+})
+
+conf_table |>
+  kable(caption = "Systematic Confounding Assessment: One-at-a-Time Addition") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(5, bold = TRUE)
+```
+
+```{r}
+#| label: conf-pct
+#| include: false
+pct <- setNames(conf_table$`% Change`, conf_table$Covariate)
+dir_word <- function(v) {
+  b_adj <- coef(confounders[[v]])["sleep_hrs"]
+  if (abs(b_adj) > abs(b_crude_val)) "stronger (more negative)" else "weaker (less negative)"
+}
+```
+
+**Interpretation:** The systematic assessment finds `r sum(pct > 10)` variables that meet the 10% change-in-estimate criterion for confounding (`r paste(names(pct)[pct > 10], collapse = ", ")`):
+
+- **Age** (`r pct["Age"]`% change): Adjusting for age made the sleep effect `r dir_word("Age")`, consistent with positive confounding, as discussed above.
+- **Education** (`r pct["Education"]`% change): Adjusting for education made the sleep coefficient `r dir_word("Education")`. This suggests that part of the crude sleep-health association may be explained by education-related differences in both sleep habits and health outcomes.
+- **General health** (`r pct["General health"]`% change): This variable produced the largest change by far, cutting the sleep coefficient by more than half. However, as we discuss in Section 6.5, this extreme attenuation raises the question of whether general health is a confounder or a mediator.
+- **Income** (`r pct["Income"]`% change): Adjusting for income made the sleep coefficient `r dir_word("Income")`, likely because higher-income individuals tend to sleep more regularly and have better access to healthcare, both of which relate to physical health.
+
+`r paste(names(pct)[pct <= 10], collapse = " and ")` (`r paste0(pct[pct <= 10], "%", collapse = " and ")`) did **not** meet the threshold. Their inclusion in the model would not meaningfully alter the estimated sleep effect.
+
+#### 6.5 Important Caveats About Confounding Assessment
+
+**Identifying candidate confounders is not purely a statistical exercise.** The three conditions for confounding (associated with exposure, associated with outcome, not on the causal pathway) require **substantive knowledge** from the literature and your understanding of the causal structure.
+
+**Caution about missing data:** When you add a covariate to the model, observations with missing values on that covariate are dropped. This changes the analytic sample, which could alter $\hat{\beta}$ for reasons unrelated to confounding. Always ensure that the crude and adjusted models are fit on the **same set of observations**.
+
+```{r}
+#| label: same-sample-check
+# Verify our dataset has no missing values (we filtered earlier)
+cat("Missing values in analytic dataset:", sum(!complete.cases(brfss_ci)), "\n")
+cat("All models are fit on the same n =", nrow(brfss_ci), "observations.\n")
+```
+
+**Confounders vs. mediators:** A variable on the causal pathway between exposure and outcome is a **mediator**, not a confounder. For example, if sleep affects exercise habits, which in turn affect physical health, then exercise is a mediator. Adjusting for a mediator would **attenuate** the exposure effect, but this attenuation is not bias; it reflects the removal of an indirect pathway. Whether to adjust depends on your research question.
+
+::: {.callout-note}
+## General health status
+
+is a tricky case. It could be a confounder (poor overall health causes both poor sleep and more physically unhealthy days) or a mediator (poor sleep leads to poor general health, which leads to more physically unhealthy days). The direction depends on the assumed causal structure and should be guided by subject-matter knowledge.
+:::
+
+### 7. Order of Operations: Interaction Before Confounding
+
+#### 7.1 Why Interaction Comes First
+
+The standard epidemiological approach to model building follows this order:
+
+1. **Assess interaction first:** test whether the exposure-outcome relationship differs across subgroups
+2. **If interaction is present:** stratify by the modifier and assess confounding within each stratum
+3. **If no interaction:** assess confounding in the pooled (unstratified) data
+
+The reason for this order is that confounding assessment assumes a single exposure effect. If the effect actually varies across subgroups (interaction), then a single "adjusted" coefficient is misleading. Reporting an average effect when the true effect differs by sex, for example, could mask important public health heterogeneity.
+
+#### 7.2 A Practical Workflow
+
+```{r}
+#| label: workflow-table
+#| echo: false
+tibble(
+  Step = 1:5,
+  Action = c(
+    "Specify the exposure-outcome relationship of interest",
+    "Identify potential effect modifiers (from literature, biological plausibility)",
+    "Test for interaction using interaction terms or stratified analysis",
+    "If interaction is present: report stratum-specific effects; assess confounding within strata",
+    "If no interaction: assess confounding in the full sample using the 10% change-in-estimate rule"
+  )
+) |>
+  kable(caption = "Workflow: Interaction Before Confounding") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+#### 7.3 Putting It All Together
+
+Let's build a final model that accounts for both potential interaction and confounding in our BRFSS data. The confounders come from the assessment in Section 6.4: **age, education, and income** each changed the sleep coefficient by more than 10%. Exercise and sex did not, so exercise is left out. **General health** also passed the 10% rule, but it is left out on purpose: as Section 6.5 explains, it may be a mediator (poor sleep, then poorer general health, then more physically unhealthy days), and adjusting for a mediator would remove part of the effect we want to estimate. Sex stays in the model because it is the effect modifier we are testing.
+
+```{r}
+#| label: final-model
+# Step 1: Test for interaction between sleep and sex, adjusted for the
+# confounders identified in Section 6.4
+mod_final_int <- lm(physhlth_days ~ sleep_hrs * sex + age + education + income_cat,
+                    data = brfss_ci)
+
+# Check interaction term
+int_pval <- tidy(mod_final_int) |>
+  filter(term == "sleep_hrs:sexFemale") |>
+  pull(p.value)
+
+cat("Interaction p-value (sleep x sex):", round(int_pval, 4), "\n")
+```
+
+**Note on the interaction result:** In this adjusted model, the sleep $\times$ sex interaction gives `r fmt_p(int_pval)`; in the unadjusted model (Section 3.3) it gave `r fmt_p(int_term$p.value)`. Interaction results can shift when covariates are added, because confounders can mask or amplify subgroup differences. `r if (int_pval < 0.05) "Here the interaction is statistically significant, so a single sleep coefficient would hide a real difference: we report the sleep slope separately for men and women below." else "Here the interaction is not statistically significant, so we proceed with the additive (no interaction) model."`
+
+```{r}
+#| label: final-model-2
+# Step 2: If interaction is not significant, fit the additive model with the
+# confounders; if it is significant, report sex-specific slopes instead
+mod_final <- lm(physhlth_days ~ sleep_hrs + sex + age + education + income_cat,
+                data = brfss_ci)
+
+tidy(mod_final, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Final Model: Sleep → Physical Health Days, Adjusted for Confounders",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+# Sex-specific sleep slopes from the interaction model (used only if the
+# interaction is significant)
+b_fi <- coef(mod_final_int)
+v_fi <- vcov(mod_final_int)
+slope_male   <- b_fi["sleep_hrs"]
+slope_female <- b_fi["sleep_hrs"] + b_fi["sleep_hrs:sexFemale"]
+se_female    <- sqrt(v_fi["sleep_hrs", "sleep_hrs"] +
+                     v_fi["sleep_hrs:sexFemale", "sleep_hrs:sexFemale"] +
+                     2 * v_fi["sleep_hrs", "sleep_hrs:sexFemale"])
+```
+
+`r if (int_pval < 0.05) paste0("**Sex-specific sleep slopes:** among men, each additional hour of sleep is associated with ", round(abs(slope_male), 2), " ", more_fewer(slope_male), " physically unhealthy days; among women, ", round(abs(slope_female), 2), " ", more_fewer(slope_female), " (SE ", round(se_female, 2), "), adjusted for age, education, and income.") else ""`
+
+`r if (int_pval < 0.05) "**Because the sleep by sex interaction is significant, the additive results below are shown for comparison only; the sex-specific slopes above are the main result.**" else ""`
+
+**Interpretation of the final model:** After adjusting for sex, age, education, and income, each additional hour of sleep is associated with `r round(abs(coef(mod_final)["sleep_hrs"]), 2)` `r more_fewer(coef(mod_final)["sleep_hrs"])` physically unhealthy days (95% CI: `r round(confint(mod_final)["sleep_hrs", 1], 2)` to `r round(confint(mod_final)["sleep_hrs", 2], 2)`, `r fmt_p(summary(mod_final)$coefficients["sleep_hrs", "Pr(>|t|)"])`). Additional findings from the adjusted model:
+
+- **Income** has a `r if (coef(mod_final)["income_cat"] < 0) "protective" else "positive"` association: each step up the 8-level income scale is associated with `r round(abs(coef(mod_final)["income_cat"]), 2)` `r more_fewer(coef(mod_final)["income_cat"])` physically unhealthy days (`r sig_text(summary(mod_final)$coefficients["income_cat", "Pr(>|t|)"])`).
+- **Age** has a small `r if (coef(mod_final)["age"] > 0) "positive" else "negative"` association: each additional year of age is associated with `r round(abs(coef(mod_final)["age"]), 3)` `r more_fewer(coef(mod_final)["age"])` unhealthy days (`r sig_text(summary(mod_final)$coefficients["age", "Pr(>|t|)"])`).
+- **Education:** compared to those with less than a high school education, college graduates report approximately `r round(abs(coef(mod_final)["educationCollege graduate"]), 1)` `r more_fewer(coef(mod_final)["educationCollege graduate"])` unhealthy days (`r sig_text(summary(mod_final)$coefficients["educationCollege graduate", "Pr(>|t|)"])`).
+- **Sex** is `r if (summary(mod_final)$coefficients["sexFemale", "Pr(>|t|)"] < 0.05) "significantly" else "not significantly"` associated with physical health days after adjustment (`r fmt_p(summary(mod_final)$coefficients["sexFemale", "Pr(>|t|)"])`).
+
+```{r}
+#| label: age-int-check
+#| include: false
+# Section 5 found that the sleep slope changes with age; check it with the
+# final covariates
+mod_age_int <- lm(physhlth_days ~ sleep_hrs * age + sex + education + income_cat,
+                  data = brfss_ci)
+p_age_int <- coef(summary(mod_age_int))["sleep_hrs:age", "Pr(>|t|)"]
+```
+
+::: {.callout-important}
+## One caution about this final model
+
+Section 5 found that the sleep slope changes with age, and with the final covariates (sex, education, and income) the sleep $\times$ age interaction is `r if (p_age_int < 0.05) "still statistically significant" else "no longer statistically significant"` (`r fmt_p(p_age_int)`). `r if (p_age_int < 0.05) "So the single sleep coefficient above is an average over ages. Following Section 1.1, a full analysis would report the sleep effect at several ages (as in Section 5.2) rather than one adjusted coefficient." else "So one adjusted sleep coefficient is a reasonable summary."`
+:::
+
+```{r}
+#| label: compare-crude-final
+b_final <- coef(mod_final)["sleep_hrs"]
+b_adj_educ <- coef(confounders[["Education"]])["sleep_hrs"]
+b_adj_inc  <- coef(confounders[["Income"]])["sleep_hrs"]
+
+tribble(
+  ~Model, ~`Sleep β`, ~`% Change from Crude`,
+  "Crude", round(b_crude_val, 4), "(reference)",
+  "Adjusted (age only)", round(coef(mod_adj_age)["sleep_hrs"], 4),
+    paste0(round(abs(b_crude_val - coef(mod_adj_age)["sleep_hrs"]) / abs(b_crude_val) * 100, 1), "%"),
+  "Adjusted (education only)", round(b_adj_educ, 4),
+    paste0(round(abs(b_crude_val - b_adj_educ) / abs(b_crude_val) * 100, 1), "%"),
+  "Adjusted (income only)", round(b_adj_inc, 4),
+    paste0(round(abs(b_crude_val - b_adj_inc) / abs(b_crude_val) * 100, 1), "%"),
+  "Final (age, education, income, sex)", round(b_final, 4),
+    paste0(round(abs(b_crude_val - b_final) / abs(b_crude_val) * 100, 1), "%")
+) |>
+  kable(caption = "Sleep Coefficient: Crude vs. Adjusted Models") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** This table tracks how the sleep coefficient changes as we add confounders. The crude estimate (`r round(b_crude_val, 4)`) represents the unadjusted association. Adding age alone moved the estimate to `r round(coef(mod_adj_age)["sleep_hrs"], 4)` (a `r round(abs(b_crude_val - coef(mod_adj_age)["sleep_hrs"]) / abs(b_crude_val) * 100, 1)`% change), confirming age as an important confounder. In the final model (age, education, income, and sex), the sleep coefficient is `r round(b_final, 4)`, only a `r round(abs(b_crude_val - b_final) / abs(b_crude_val) * 100, 1)`% change from the crude estimate. This small overall change may seem surprising given that individual confounders produced larger shifts. The reason is that the confounders act in **opposing directions**: age adjustment makes the sleep effect `r if (abs(coef(mod_adj_age)["sleep_hrs"]) > abs(b_crude_val)) "stronger (more negative)" else "weaker (less negative)"`, while education and income adjustment make it `r if (abs(b_adj_educ) < abs(b_crude_val) && abs(b_adj_inc) < abs(b_crude_val)) "weaker (less negative)" else "stronger"`. When all confounders are included together, these opposing adjustments largely cancel out. This underscores why it is important to assess confounders both individually and jointly.
+
+## Summary of Key Concepts
+
+| Concept | Key Point |
+|---------|-----------|
+| Predictive vs. associative | Confounding and interaction matter for associative (etiologic) modeling |
+| Interaction | The effect of the exposure differs across levels of a modifier |
+| Stratified analysis | Fit separate models per stratum; informative but no formal test |
+| Interaction term | $X_1 \times X_2$ in the model; t-test on $\beta_3$ tests parallelism |
+| `:` vs. `*` in R | `:` = interaction only; `*` = main effects + interaction |
+| Must include main effects | Never include $X_1 X_2$ without also including $X_1$ and $X_2$ |
+| Partial F-test for interaction | Tests all $k - 1$ interaction terms simultaneously |
+| Continuous $\times$ continuous | The slope of one predictor changes linearly with the other |
+| Confounding | A third variable distorts the exposure-outcome association |
+| Three conditions | Associated with exposure, associated with outcome, not on causal pathway |
+| 10% change-in-estimate | Compare crude and adjusted $\hat{\beta}$; >10% change = confounder |
+| Interaction before confounding | Assess interaction first; if present, stratify before assessing confounding |
+| Mediator vs. confounder | Adjusting for a mediator removes an indirect effect, not bias |
+
+## Part 2: In-Class Lab Activity
+
+### Instructions
+
+In this lab, you will assess interaction and confounding in the BRFSS 2020 dataset. Work through each task systematically. You may discuss concepts with classmates, but your written answers and R code must be your own.
+
+[Download the lab template (.qmd)](../labs/templates/template-confounding-lab.qmd){.btn .btn-sm .btn-outline-primary download="confounding-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_Confounding_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `physhlth_days` | Physically unhealthy days in past 30 | Continuous (0--30) |
+| `sleep_hrs` | Sleep hours per night | Continuous (1--14) |
+| `menthlth_days` | Mentally unhealthy days in past 30 | Continuous (0--30) |
+| `age` | Age in years (capped at 80) | Continuous |
+| `sex` | Sex (Male/Female) | Factor |
+| `education` | Education level (4 categories) | Factor |
+| `exercise` | Any physical activity (Yes/No) | Factor |
+| `gen_health` | General health status (5 categories) | Factor |
+| `income_cat` | Household income (1--8 ordinal) | Numeric |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(car)
+library(ggeffects)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("PHYSHLTH", "SLEPTIM1", "MENTHLTH", "_AGE80", "SEXVAR", "EDUCA",
+           "EXERANY2", "GENHLTH", "INCOME2")
+) |>
+  janitor::clean_names()
+
+brfss_ci <- brfss_full |>
+  mutate(
+    # Outcome: physically unhealthy days in past 30
+    physhlth_days = case_when(
+      physhlth == 88                    ~ 0,
+      physhlth >= 1 & physhlth <= 30   ~ as.numeric(physhlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Primary exposure: sleep hours
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14   ~ as.numeric(sleptim1),
+      TRUE                             ~ NA_real_
+    ),
+    # Mentally unhealthy days (covariate)
+    menthlth_days = case_when(
+      menthlth == 88                    ~ 0,
+      menthlth >= 1 & menthlth <= 30   ~ as.numeric(menthlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Age
+    age = age80,
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Education (4-level)
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    # Exercise in past 30 days
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    # General health status
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    # Income category (ordinal 1-8)
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(menthlth_days),
+    !is.na(age), age >= 18,
+    !is.na(sex),
+    !is.na(education),
+    !is.na(exercise),
+    !is.na(gen_health),
+    !is.na(income_cat)
+  )
+
+# Reproducible random sample
+set.seed(1220)
+brfss_ci <- brfss_ci |>
+  select(physhlth_days, sleep_hrs, menthlth_days, age, sex,
+         education, exercise, gen_health, income_cat) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Exploratory Data Analysis (15 points)
+
+**1a. (5 pts)** Create a scatterplot of `physhlth_days` (y-axis) vs. `age` (x-axis), colored by `exercise` status. Add separate regression lines for each group. Describe the pattern you observe.
+
+**1b. (5 pts)** Compute the mean `physhlth_days` for each combination of `sex` and `exercise`. Present the results in a table. Does it appear that the association between exercise and physical health days might differ by sex?
+
+**1c. (5 pts)** Create a scatterplot of `physhlth_days` vs. `sleep_hrs`, faceted by `education` level. Comment on whether the slopes appear similar or different across education groups.
+
+### Task 2: Stratified Analysis for Interaction (15 points)
+
+**2a. (5 pts)** Fit separate simple linear regression models of `physhlth_days ~ age` for exercisers and non-exercisers. Report the slope, SE, and 95% CI for age in each stratum.
+
+**2b. (5 pts)** Create a single plot showing the two fitted regression lines (one per exercise group) overlaid on the data. Are the lines approximately parallel?
+
+**2c. (5 pts)** Can you formally test whether the two slopes are different using only the stratified results? Explain why or why not.
+
+### Task 3: Interaction via Regression (25 points)
+
+**3a. (5 pts)** Fit the interaction model: `physhlth_days ~ age * exercise`. Write out the fitted equation.
+
+**3b. (5 pts)** Using the fitted equation, derive the stratum-specific equations for exercisers and non-exercisers. Verify that these match the stratified analysis from Task 2.
+
+**3c. (5 pts)** Conduct the t-test for the interaction term (`age:exerciseYes`). State the null and alternative hypotheses, report the test statistic and p-value, and state your conclusion about whether interaction is present.
+
+**3d. (5 pts)** Now fit a model with an interaction between age and education: `physhlth_days ~ age * education`. How many interaction terms are produced? Use a partial F-test to test whether the age $\times$ education interaction as a whole is significant.
+
+**3e. (5 pts)** Create a visualization using `ggpredict()` showing the predicted `physhlth_days` by age for each education level. Do the lines appear parallel?
+
+### Task 4: Confounding Assessment (25 points)
+
+For this task, the **exposure** is `exercise` and the **outcome** is `physhlth_days`.
+
+**4a. (5 pts)** Fit the crude model: `physhlth_days ~ exercise`. Report the exercise coefficient. This is the unadjusted estimate.
+
+**4b. (10 pts)** Systematically assess whether each of the following is a confounder of the exercise-physical health association: `age`, `sex`, `sleep_hrs`, `education`, and `income_cat`. For each:
+
+- Fit the model `physhlth_days ~ exercise + [covariate]`
+- Report the adjusted exercise coefficient
+- Compute the percent change from the crude estimate
+- Apply the 10% rule to determine if the variable is a confounder
+
+Present your results in a single summary table.
+
+**4c. (5 pts)** Fit a fully adjusted model including exercise and all identified confounders. Report the exercise coefficient and compare it to the crude estimate. How much did the estimate change overall?
+
+**4d. (5 pts)** Is `gen_health` a confounder or a mediator of the exercise-physical health relationship? Could it be both? Explain your reasoning with reference to the three conditions for confounding and the concept of the causal pathway.
+
+### Task 5: Public Health Interpretation (20 points)
+
+**5a. (10 pts)** Based on your analyses, write a **4--5 sentence paragraph** for a public health audience summarizing:
+
+- Whether the association between exercise and physical health differs by any subgroup (interaction assessment)
+- Which variables confounded the exercise-physical health association
+- The direction and approximate magnitude of the adjusted exercise effect
+- Appropriate caveats about cross-sectional data and potential unmeasured confounding
+
+Do not use statistical jargon.
+
+**5b. (10 pts)** A colleague suggests including `gen_health` as a covariate in the final model because it changes the exercise coefficient by more than 10%. You disagree. Write a **3--4 sentence argument** explaining why adjusting for general health may not be appropriate if the goal is to estimate the total effect of exercise on physical health days. Use the concept of mediation in your argument.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

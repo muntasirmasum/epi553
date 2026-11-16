@@ -1032,6 +1032,10 @@ In this lab, you will apply Simple Linear Regression to the **BRFSS 2020** datas
 
 **Research Question:** Is BMI associated with the number of days of poor physical health among U.S. adults?
 
+[Download the lab template (.qmd)](../labs/templates/template-slr-lab.qmd){.btn .btn-sm .btn-outline-primary download="slr-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task with its starter code. Save it as `LastName_FirstName_SLR_Lab.qmd`.
+
 ### Setup Instructions
 
 The lab uses the same 3,000 adults as the lecture. Put the code below at the top of your lab `.qmd`. If you have not used brfssdata before, install it first with `install.packages(c("brfssdata", "janitor"))`; the first run downloads BRFSS 2020 once, and later runs read it from your computer.
@@ -1229,7 +1233,7 @@ format:
     embed-resources: true
 ```
 
-An `.Rmd` that uses `output: html_document` does this by default.
+If you use an `.Rmd`, see [Submitting your work](../resources/submitting-your-work.qmd): RStudio's **Knit** embeds figures by default, but Positron renders an `.Rmd` with Quarto and needs the same YAML lines.
 
 Your file must render without errors. Make sure all code chunks produce visible output and all questions are answered in complete sentences below each code chunk.
 

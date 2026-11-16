@@ -1,0 +1,1127 @@
+---
+title: "Model Selection"
+subtitle: "Choose which variables belong in a model, for prediction or for estimating one exposure's effect."
+description: "The maximum model, R², adjusted R², partial F, AIC, and BIC, best subsets and stepwise selection, the 10% rule for associative models, and cross-validation, using physically unhealthy days in BRFSS 2020."
+order: 10
+unit: "Linear regression"
+categories: [Linear regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- build a maximum model and explain the trade-off between overfitting and underfitting;
+- compare models with $R^2$, adjusted $R^2$, the partial F-test, AIC, and BIC;
+- run best subsets, backward, forward, and stepwise selection in R and describe their limits;
+- select covariates for an associative model with the 10% change-in-estimate rule;
+- estimate out-of-sample prediction error with k-fold cross-validation.
+:::
+
+## Introduction
+
+In previous lectures, we learned how to fit multiple linear regression models, include dummy variables for categorical predictors, test for interactions, and assess confounding. But we have not yet addressed a fundamental question: **how do we decide which variables belong in the model?**
+
+This question has different answers depending on the goal of the analysis:
+
+| Goal | What matters | Variable selection driven by |
+|------|-------------|------------------------------|
+| **Prediction** | Model accuracy and reliability in new data | Statistical criteria (Adj. $R^2$, AIC, BIC, cross-validation) |
+| **Association** | Validity of the exposure coefficient | Subject-matter knowledge, confounding assessment, 10% rule |
+
+In **predictive** modeling, we search for the subset of variables that best predicts $Y$ without overfitting. In **associative** modeling, the exposure variable is always in the model, and we decide which covariates to include based on whether they are confounders.
+
+This lecture covers both approaches, with emphasis on when each is appropriate and the pitfalls of automated selection.
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(leaps)
+library(MASS)  # load after the tidyverse; use dplyr::select() for select
+```
+
+### The BRFSS 2020 Dataset
+
+We continue with the BRFSS 2020 dataset, predicting **physically unhealthy days** from a pool of candidate predictors.
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode ten variables and draw a random sample of 5,000 adults with complete data.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the ten BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("PHYSHLTH", "SLEPTIM1", "MENTHLTH", "_AGE80", "SEXVAR", "EDUCA",
+           "EXERANY2", "GENHLTH", "INCOME2", "_BMI5")
+) |>
+  janitor::clean_names()
+```
+
+```{r}
+#| label: prepare-data
+brfss_ms <- brfss_full |>
+  mutate(
+    # Outcome
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    # Candidate predictors
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_)
+  ) |>
+  filter(
+    !is.na(physhlth_days), !is.na(menthlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(education),
+    !is.na(exercise), !is.na(gen_health), !is.na(income_cat), !is.na(bmi)
+  )
+
+set.seed(1220)
+brfss_ms <- brfss_ms |>
+  dplyr::select(physhlth_days, menthlth_days, sleep_hrs, age, sex,
+                education, exercise, gen_health, income_cat, bmi) |>
+  slice_sample(n = 5000)
+
+tibble(Metric = c("Observations", "Variables"),
+       Value  = c(nrow(brfss_ms), ncol(brfss_ms))) |>
+  kable(caption = "Analytic Dataset Dimensions") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+We have **10 variables**: 1 outcome and 9 candidate predictors. If we considered all possible subsets of the 9 predictors (ignoring interactions and transformations), there would be $2^9 - 1 = 511$ possible models.
+
+## Part 1: Guided Practice
+
+### 1. Building the Maximum Model
+
+#### 1.1 What Is the Maximum Model?
+
+The **maximum model** is the model that includes all candidate predictor variables. It represents the upper bound of complexity. The "correct" model will have $p \leq k$ predictors, where $k$ is the number in the maximum model.
+
+The candidate variables in the maximum model can include:
+
+- Main effects (e.g., age, sex, BMI)
+- Higher-order terms (e.g., age$^2$, age$^3$)
+- Transformations (e.g., log(BMI))
+- Interactions (e.g., sex $\times$ age)
+
+These candidates are chosen based on a **literature search** and the **research question**, not by throwing in every available variable.
+
+```{r}
+#| label: maximum-model
+# The maximum model with all candidate predictors
+mod_max <- lm(physhlth_days ~ menthlth_days + sleep_hrs + age + sex +
+                education + exercise + gen_health + income_cat + bmi,
+              data = brfss_ms)
+
+tidy(mod_max, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Maximum Model: All Candidate Predictors",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+glance(mod_max) |>
+  dplyr::select(r.squared, adj.r.squared, sigma, AIC, BIC, df.residual) |>
+  mutate(across(everything(), \(x) round(x, 3))) |>
+  kable(caption = "Maximum Model: Fit Statistics") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: max-summary
+#| include: false
+tm <- tidy(mod_max)
+gm <- glance(mod_max)
+nonsig <- tm |> filter(term != "(Intercept)", p.value >= 0.05)
+```
+
+**Interpretation:** The maximum model explains approximately `r round(100 * gm$r.squared, 1)`% of the variance in physically unhealthy days (R² = `r round(gm$r.squared, 3)`, Adjusted R² = `r round(gm$adj.r.squared, 3)`). The strongest predictors are **general health status** (with "Poor" health associated with about `r round(coef(mod_max)["gen_healthPoor"])` more unhealthy days compared to "Excellent") and **mental health days** (each additional mentally unhealthy day is associated with `r round(coef(mod_max)["menthlth_days"], 2)` more physically unhealthy days). **Exercise** is also strongly associated, with exercisers reporting about `r round(abs(coef(mod_max)["exerciseYes"]), 1)` `r more_fewer(coef(mod_max)["exerciseYes"])` physically unhealthy days. Several terms are not statistically significant: `r paste0(nonsig$term, " (p = ", formatC(nonsig$p.value, format = "f", digits = 2), ")", collapse = ", ")`. Sex, education, and BMI may therefore be candidates for removal in a more parsimonious model. The AIC is `r format(round(gm$AIC, 1), big.mark = ",", nsmall = 1)` and BIC is `r format(round(gm$BIC, 1), big.mark = ",", nsmall = 1)`; these serve as baselines for comparing simpler models.
+
+#### 1.2 Overfitting vs. Underfitting
+
+The goal of model building is to find the right balance:
+
+| Problem | What happens | Consequence |
+|---------|-------------|-------------|
+| **Overfitting** | Including variables with $\beta = 0$ | No bias, but increased collinearity, inflated SEs, poor out-of-sample prediction |
+| **Underfitting** | Omitting variables with $\beta \neq 0$ | **Bias** in the remaining coefficients (omitted variable bias) |
+
+::: {.callout-important}
+## Key insight
+
+Underfitting is worse than overfitting in terms of bias. An overfit model gives unbiased estimates (just less precise), while an underfit model gives biased estimates. However, for prediction, overfitting degrades out-of-sample performance.
+:::
+
+The objective is a **parsimonious** model: the simplest model that captures the important relationships without unnecessary complexity.
+
+#### 1.3 How Many Predictors Can We Include?
+
+The error degrees of freedom must be positive: $n - k - 1 > 0$, meaning $n > k + 1$.
+
+Rules of thumb for the minimum sample size:
+
+| Rule | Requirement | Our data (n = 5,000) |
+|------|------------|---------------------|
+| Minimum 10 error df | $n \geq k + 11$ | Can include up to 4,989 predictors |
+| 5 observations per predictor | $n \geq 5k$ | Can include up to 1,000 predictors |
+| 10 observations per predictor | $n \geq 10k$ | Can include up to 500 predictors |
+
+With $n = 5,000$, we are well within all rules of thumb for our 9 candidate predictors (plus dummy variables).
+
+::: {.callout-warning}
+## Caution with categorical variables
+
+A categorical predictor with $k$ levels uses $k - 1$ degrees of freedom, not just 1. Our education (4 levels) uses 3 df, gen_health (5 levels) uses 4 df, so the maximum model actually uses `r length(coef(mod_max)) - 1` predictor df.
+:::
+
+### 2. Selection Criteria
+
+Given a set of candidate models, we need a **criterion** to compare them. We cover five: $R^2$, Adjusted $R^2$, $F_p$ (partial F-test), AIC, and BIC.
+
+#### 2.1 $R^2$ (Coefficient of Determination)
+
+$$R^2 = 1 - \frac{SSE}{SST} = \frac{SSR}{SST}$$
+
+$R^2$ measures the proportion of variance in $Y$ explained by the model. However, $R^2$ **always increases** (or stays the same) when you add a predictor, regardless of whether it is useful. This makes raw $R^2$ useless for model comparison across models of different sizes.
+
+```{r}
+#| label: r2-always-increases
+# Demonstrate that R2 always increases
+models <- list(
+  "Sleep only"       = lm(physhlth_days ~ sleep_hrs, data = brfss_ms),
+  "+ age"            = lm(physhlth_days ~ sleep_hrs + age, data = brfss_ms),
+  "+ sex"            = lm(physhlth_days ~ sleep_hrs + age + sex, data = brfss_ms),
+  "+ education"      = lm(physhlth_days ~ sleep_hrs + age + sex + education, data = brfss_ms),
+  "+ exercise"       = lm(physhlth_days ~ sleep_hrs + age + sex + education + exercise, data = brfss_ms),
+  "+ gen_health"     = lm(physhlth_days ~ sleep_hrs + age + sex + education + exercise + gen_health, data = brfss_ms),
+  "+ mental health"  = lm(physhlth_days ~ sleep_hrs + age + sex + education + exercise + gen_health + menthlth_days, data = brfss_ms),
+  "+ income"         = lm(physhlth_days ~ sleep_hrs + age + sex + education + exercise + gen_health + menthlth_days + income_cat, data = brfss_ms),
+  "+ BMI (full)"     = lm(physhlth_days ~ sleep_hrs + age + sex + education + exercise + gen_health + menthlth_days + income_cat + bmi, data = brfss_ms)
+)
+
+r2_table <- map_dfr(names(models), \(name) {
+  g <- glance(models[[name]])
+  tibble(
+    Model = name,
+    p = length(coef(models[[name]])) - 1,
+    `R²` = round(g$r.squared, 4),
+    `Adj. R²` = round(g$adj.r.squared, 4),
+    AIC = round(g$AIC, 1),
+    BIC = round(g$BIC, 1)
+  )
+})
+
+r2_table |>
+  kable(caption = "Model Comparison: R² Always Increases as Predictors Are Added") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** Notice that R² never decreases, rising from `r r2_table[[3]][1]` (sleep only) to `r r2_table[[3]][9]` (full model) as predictors are added. Adjusted R² tells a different story: it reaches `r max(r2_table[[4]])` at "`r r2_table$Model[which.max(r2_table[[4]])]`" and adding BMI does not improve it further (`r r2_table[[4]][9]`). The largest single jump in both R² and Adjusted R² occurs when **general health** is added (R² from `r r2_table[[3]][5]` to `r r2_table[[3]][6]`), indicating it is by far the most powerful predictor. AIC and BIC both decrease sharply at that same step. `r if (which.min(r2_table$AIC) == which.min(r2_table$BIC)) paste0("Both reach their minimum at \"", r2_table$Model[which.min(r2_table$AIC)], "\"") else paste0("AIC reaches its minimum at \"", r2_table$Model[which.min(r2_table$AIC)], "\" and BIC at \"", r2_table$Model[which.min(r2_table$BIC)], "\"")` (AIC = `r format(min(r2_table$AIC), big.mark = ",", nsmall = 1)`, BIC = `r format(min(r2_table$BIC), big.mark = ",", nsmall = 1)`)`r if (which.min(r2_table$AIC) < 9 && which.min(r2_table$BIC) < 9) ", and both rise again when BMI is added, so neither criterion favors the full model" else ""`. This table illustrates a key lesson: R² will always reward you for adding variables, even useless ones, making it unreliable for model comparison.
+
+#### 2.2 Adjusted $R^2$
+
+Adjusted $R^2$ penalizes for model complexity:
+
+$$R^2_{adj} = 1 - \frac{(n - 1)(1 - R^2)}{n - p - 1}$$
+
+where $n$ is the sample size and $p$ is the number of predictors (not counting the intercept). Unlike $R^2$, Adjusted $R^2$ can **decrease** when an uninformative predictor is added, because the penalty for using an extra degree of freedom outweighs the tiny increase in $R^2$.
+
+::: {.callout-note}
+## Selection rule
+
+Choose the model with the **largest** Adjusted $R^2$.
+:::
+
+#### 2.3 $F_p$ (Partial F-Test)
+
+The partial F-test compares a reduced model (with $p$ predictors) to the maximum model (with $k$ predictors):
+
+$$F_p = \frac{\{SSE(p) - SSE(k)\} / (k - p)}{SSE(k) / (n - k - 1)}$$
+
+This tests $H_0$: the $k - p$ omitted variables all have $\beta = 0$.
+
+- If $F_p$ is **not significant**, the reduced model is adequate (the extra variables are not needed)
+- If $F_p$ **is significant**, at least one of the omitted variables is important
+
+::: {.callout-note}
+## Selection rule
+
+Choose the smallest model for which $F_p$ is not significant when compared to the maximum model.
+:::
+
+```{r}
+#| label: partial-f-example
+# Compare a small model to the maximum model
+mod_small <- lm(physhlth_days ~ menthlth_days + gen_health + exercise, data = brfss_ms)
+
+f_small <- anova(mod_small, mod_max)
+
+f_small |>
+  tidy() |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(caption = "Partial F-test: Small Model vs. Maximum Model") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** The partial F-test compares the small model (mental health days + general health + exercise) to the maximum model (all 9 predictors). The six omitted variables (sleep, age, sex, education, income, BMI) use `r f_small$Df[2]` degrees of freedom, because education enters as 3 dummy variables. F(`r f_small$Df[2]`, `r f_small$Res.Df[2]`) = `r round(f_small$F[2], 2)` with `r fmt_p(f_small[2, "Pr(>F)"])`, so the null hypothesis that the omitted terms all have β = 0 is `r if (f_small[2, "Pr(>F)"] < 0.05) "rejected" else "not rejected"`. In other words, **at least one of the omitted variables contributes significantly** to the model beyond the three core predictors. This means the small model, despite capturing much of the explained variance, is missing important information. We should look for a model between the small and maximum that retains the significant predictors while dropping the uninformative ones.
+
+#### 2.4 AIC (Akaike Information Criterion)
+
+$$AIC = 2k - 2\log(\hat{L})$$
+
+where $k$ is the number of estimated parameters and $\hat{L}$ is the maximized likelihood. AIC measures the relative **information lost** by a model. It balances goodness of fit against complexity.
+
+- AIC is **not** a test; it is a relative comparison tool
+- The model with the **smallest** AIC is preferred
+- AIC differences < 2 suggest models are essentially equivalent
+
+::: {.callout-note}
+## Selection rule
+
+Choose the model with the **smallest** AIC.
+:::
+
+#### 2.5 BIC (Bayesian Information Criterion)
+
+$$BIC = k \log(n) - 2\log(\hat{L})$$
+
+BIC is similar to AIC but penalizes complexity **more heavily**, especially with large sample sizes ($\log(n)$ vs. 2). BIC tends to select simpler models than AIC.
+
+::: {.callout-note}
+## Selection rule
+
+Choose the model with the **smallest** BIC.
+:::
+
+#### 2.6 MSE(p) (Mean Squared Error)
+
+$$MSE(p) = \frac{SSE_p}{n - p - 1}$$
+
+MSE(p) is the residual variance for a model with $p$ predictors. It balances fit (smaller SSE) against model size (fewer df in the denominator).
+
+::: {.callout-note}
+## Selection rule
+
+Choose the model with the **smallest** MSE(p).
+:::
+
+#### 2.7 Comparing the Criteria
+
+```{r}
+#| label: criteria-comparison
+#| echo: false
+tibble(
+  Criterion = c("R²", "Adjusted R²", "Fp (partial F)", "AIC", "BIC", "MSE(p)"),
+  Direction = c("Maximize", "Maximize", "Not significant → keep reduced",
+                "Minimize", "Minimize", "Minimize"),
+  Penalizes = c("No", "Yes (df penalty)", "Yes (F distribution)",
+                 "Yes (2k)", "Yes (k log n)", "Yes (df in denominator)"),
+  `Best for` = c("Never use alone", "Comparing nested models",
+                  "Comparing to maximum model", "General comparison",
+                  "Favors simpler models", "Similar to Adj. R²")
+) |>
+  kable(caption = "Summary of Model Selection Criteria") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: criteria-plot
+#| fig-alt: !expr sprintf("Line plot of AIC (red) and BIC (blue) against predictor degrees of freedom for the nine sequential models. Both fall slowly from about %s at 1 df to about %s at 7 df, drop steeply when general health is added at 11 df, reach their lowest values at %d df (AIC %s, BIC %s), and rise slightly at 14 df. The BIC line stays just above the AIC line.", format(round(r2_table$AIC[1], -2), big.mark = ","), format(round(r2_table$AIC[5], -2), big.mark = ","), r2_table$p[which.min(r2_table$AIC)], format(min(r2_table$AIC), big.mark = ","), format(min(r2_table$BIC), big.mark = ","))
+#| fig-cap: AIC and BIC Across Sequential Models
+criteria_long <- r2_table |>
+  dplyr::select(Model, p, AIC, BIC) |>
+  pivot_longer(cols = c(AIC, BIC), names_to = "Criterion", values_to = "Value") |>
+  mutate(Model = factor(Model, levels = r2_table$Model))
+
+ggplot(criteria_long, aes(x = p, y = Value, color = Criterion)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  labs(
+    title = "AIC and BIC Across Sequentially Larger Models",
+    subtitle = "Lower is better; BIC penalizes complexity more heavily",
+    x = "Number of Predictor Degrees of Freedom (p)",
+    y = "Criterion Value"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Set1")
+```
+
+**Interpretation:** Both AIC and BIC decrease sharply as the first several predictors are added, with the steepest drop when general health enters the model. `r if (which.min(r2_table$AIC) == which.min(r2_table$BIC)) paste0("In this sequence of models both criteria reach their lowest value at the same step (\"", r2_table$Model[which.min(r2_table$AIC)], "\", ", r2_table$p[which.min(r2_table$AIC)], " predictor df) and rise slightly when BMI is added; BIC rises more, reflecting its heavier penalty for model complexity.") else paste0("In this sequence AIC reaches its lowest value at \"", r2_table$Model[which.min(r2_table$AIC)], "\" and BIC earlier, at \"", r2_table$Model[which.min(r2_table$BIC)], "\", reflecting its heavier penalty for model complexity.")` AIC and BIC often disagree in large samples: AIC tends to select larger models, while BIC favors parsimony. In practice, when AIC and BIC disagree, the choice depends on the modeling goal: AIC is better for prediction (it minimizes information loss), while BIC is better for identifying the "true" model (it is consistent, meaning it selects the correct model as n grows).
+
+### 3. Variable Selection Strategies
+
+#### 3.1 All Possible Regressions (Best Subsets)
+
+The most thorough approach is to fit **every possible subset** of predictors and compare them. With $k$ predictors, there are $2^k - 1$ models.
+
+This is computationally feasible for moderate $k$ (up to about 20-30 predictors). In R, the `leaps` package implements this efficiently:
+
+```{r}
+#| label: best-subsets
+# Prepare a model matrix (need numeric predictors for leaps)
+# Use the formula interface approach
+best_subsets <- regsubsets(
+  physhlth_days ~ menthlth_days + sleep_hrs + age + sex + education +
+    exercise + gen_health + income_cat + bmi,
+  data = brfss_ms,
+  nvmax = 15,      # maximum number of variables to consider
+  method = "exhaustive"
+)
+
+best_summary <- summary(best_subsets)
+```
+
+```{r}
+#| label: best-subsets-plot
+#| fig-alt: !expr sprintf("Two line plots of the best model of each size (1 to %d variables) from best subsets regression. Left, adjusted R-squared rises steeply from %.2f with 1 variable to about %.2f by 5 variables and then stays flat, with its maximum at %d variables marked by a dashed line. Right, BIC falls steeply to about 5 variables, is nearly flat from 5 to 8, reaches its minimum at %d variables (dashed line), and then rises slowly.", length(best_summary$bic), best_summary$adjr2[1], best_summary$adjr2[5], which.max(best_summary$adjr2), which.min(best_summary$bic))
+#| fig-cap: 'Best Subsets: Adjusted R² and BIC by Model Size'
+subset_metrics <- tibble(
+  p = 1:length(best_summary$adjr2),
+  `Adj. R²` = best_summary$adjr2,
+  BIC = best_summary$bic,
+  Cp = best_summary$cp
+)
+
+p1 <- ggplot(subset_metrics, aes(x = p, y = `Adj. R²`)) +
+  geom_line(linewidth = 1, color = "steelblue") +
+  geom_point(size = 3, color = "steelblue") +
+  geom_vline(xintercept = which.max(best_summary$adjr2),
+             linetype = "dashed", color = "tomato") +
+  labs(title = "Adjusted R² by Model Size", x = "Number of Variables", y = "Adjusted R²") +
+  theme_minimal(base_size = 12)
+
+p2 <- ggplot(subset_metrics, aes(x = p, y = BIC)) +
+  geom_line(linewidth = 1, color = "steelblue") +
+  geom_point(size = 3, color = "steelblue") +
+  geom_vline(xintercept = which.min(best_summary$bic),
+             linetype = "dashed", color = "tomato") +
+  labs(title = "BIC by Model Size", x = "Number of Variables", y = "BIC") +
+  theme_minimal(base_size = 12)
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r}
+#| label: best-subsets-which
+cat("Best model by Adj. R²:", which.max(best_summary$adjr2), "variables\n")
+cat("Best model by BIC:", which.min(best_summary$bic), "variables\n")
+
+# Show which variables are in the BIC-best model
+best_bic_idx <- which.min(best_summary$bic)
+best_vars <- names(which(best_summary$which[best_bic_idx, -1]))
+cat("\nVariables in BIC-best model:\n")
+cat(paste(" ", best_vars), sep = "\n")
+```
+
+```{r}
+#| label: subsets-summary
+#| include: false
+all_cols <- colnames(best_summary$which)[-1]
+dropped_bic <- setdiff(all_cols, best_vars)
+```
+
+**Interpretation:** Adjusted R² reaches its maximum at `r which.max(best_summary$adjr2)` variables and plateaus, while BIC selects a more parsimonious model with `r which.min(best_summary$bic)` variables. The BIC-best model retains `r paste(best_vars, collapse = ", ")`. It drops `r paste(dropped_bic, collapse = ", ")`; dropping "Very good" health combines that level with the reference group (Excellent). The core predictors (mental health, general health, exercise) appear in every good model, which gives us confidence that these are the important variables.
+
+#### 3.2 Backward Elimination
+
+**Backward elimination** starts with the maximum model and removes variables one at a time:
+
+1. Fit the maximum model
+2. Identify the predictor with the **highest p-value** (smallest partial F-statistic)
+3. If its p-value exceeds $\alpha$ (typically 0.05 or 0.10), remove it
+4. Refit the model and repeat steps 2-3
+5. Stop when all remaining variables have p-values $\leq \alpha$
+
+```{r}
+#| label: backward-manual
+# Step-by-step backward elimination (manual demonstration)
+cat("=== BACKWARD ELIMINATION ===\n\n")
+
+# Step 1: Maximum model
+mod_back <- mod_max
+cat("Step 1: Maximum model\n")
+cat("Variables:", paste(names(coef(mod_back))[-1], collapse = ", "), "\n")
+
+# Show p-values for the maximum model
+pvals <- tidy(mod_back) |>
+  filter(term != "(Intercept)") |>
+  arrange(desc(p.value)) |>
+  dplyr::select(term, estimate, p.value) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4)))
+
+pvals |>
+  head(5) |>
+  kable(caption = "Maximum Model: Variables Sorted by p-value (Highest First)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+In R, the `step()` function automates backward elimination using AIC. The AIC values that `step()` prints come from `extractAIC()`, which leaves out constant terms, so they differ from `AIC()` in the tables; the differences between models are the same.
+
+::: {.callout-note collapse="true"}
+## Full step() trace, backward elimination
+
+```{r}
+#| label: backward-step
+# Automated backward elimination using AIC
+mod_backward <- step(mod_max, direction = "backward", trace = 1)
+```
+:::
+
+```{r}
+#| label: backward-result
+tidy(mod_backward, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Backward Elimination Result (AIC-based)",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: backward-summary
+#| include: false
+terms_max  <- attr(terms(mod_max), "term.labels")
+terms_back <- attr(terms(mod_backward), "term.labels")
+removed    <- setdiff(terms_max, terms_back)
+tb         <- tidy(mod_backward) |> filter(term != "(Intercept)")
+nonsig_back <- tb |> filter(p.value >= 0.05)
+```
+
+**Interpretation:** AIC-based backward elimination removed `r knitr::combine_words(removed)` from the maximum model, arriving at a model with `r nrow(tb)` predictor terms (counting dummy variables). These are the variables whose coefficients were not significant in the maximum model. `r if (nrow(nonsig_back) == 0) "All retained terms have p-values below 0.05." else paste0("Every retained variable is significant as a whole, but not every term: ", paste0(nonsig_back$term, " (p = ", formatC(nonsig_back$p.value, format = "f", digits = 3), ")", collapse = ", "), " is not, because AIC keeps or drops a categorical variable as a whole, not level by level.")` The resulting model has Adjusted R² = `r round(glance(mod_backward)$adj.r.squared, 3)`, essentially identical to the maximum model (`r round(glance(mod_max)$adj.r.squared, 3)`), confirming that the dropped variables contributed negligible explanatory power.
+
+#### 3.3 Forward Selection
+
+**Forward selection** starts with the intercept-only model and adds variables one at a time:
+
+1. Start with no predictors (intercept only)
+2. For each candidate variable, compute the partial F-statistic for adding it to the current model
+3. Add the variable with the **smallest p-value** (largest partial F)
+4. If its p-value is $\leq \alpha$, keep it and repeat steps 2-3
+5. Stop when no remaining variable has a p-value $\leq \alpha$
+
+::: {.callout-note collapse="true"}
+## Full step() trace, forward selection
+
+```{r}
+#| label: forward-step
+# Automated forward selection using AIC
+mod_null <- lm(physhlth_days ~ 1, data = brfss_ms)
+
+mod_forward <- step(mod_null,
+                    scope = list(lower = mod_null, upper = mod_max),
+                    direction = "forward", trace = 1)
+```
+:::
+
+```{r}
+#| label: forward-result
+tidy(mod_forward, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Forward Selection Result (AIC-based)",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: forward-summary
+#| include: false
+same_fb <- setequal(attr(terms(mod_forward), "term.labels"), terms_back)
+entry_order <- sub("^\\+ ", "", mod_forward$anova$Step[-1])
+```
+
+**Interpretation:** Forward selection arrived at `r if (same_fb) "the same final model as backward elimination" else "a different model from backward elimination"`, with `r length(coef(mod_forward)) - 1` predictor terms. The order of entry is informative: `r entry_order[1]` entered first (the strongest predictor), followed by `r knitr::combine_words(entry_order[-1])`. This ordering reflects each variable's marginal contribution given the variables already in the model. `r if (same_fb) "The convergence of forward and backward methods on the same model increases our confidence in this particular subset, though this convergence is not guaranteed in general." else ""`
+
+#### 3.4 Stepwise Selection
+
+**Stepwise selection** combines forward and backward: after adding a variable, it checks whether any previously entered variable should now be removed. This addresses a limitation of pure forward selection, where a variable that was useful early on may become redundant after other variables enter.
+
+::: {.callout-note collapse="true"}
+## Full step() trace, stepwise selection
+
+```{r}
+#| label: stepwise
+mod_stepwise <- step(mod_null,
+                     scope = list(lower = mod_null, upper = mod_max),
+                     direction = "both", trace = 1)
+```
+:::
+
+```{r}
+#| label: stepwise-result
+tidy(mod_stepwise, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Stepwise Selection Result (AIC-based)",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: stepwise-summary
+#| include: false
+same_sw <- setequal(attr(terms(mod_stepwise), "term.labels"), terms_back)
+n_removals <- sum(startsWith(mod_stepwise$anova$Step, "-"))
+```
+
+**Interpretation:** The stepwise procedure, which allows both addition and removal at each step, `r if (same_sw) "also converges on the identical model" else "converges on a different model"`. `r if (n_removals == 0) "In this dataset, no variable that was added early became redundant after later variables entered, so no removals were needed." else paste(n_removals, "variables were removed after being added.")` `r if (same_fb && same_sw) "This three-way agreement (backward = forward = stepwise) is reassuring but should not be taken as proof" else "Agreement between methods would be reassuring, but even agreement should not be taken as proof"` that this is the "correct" model. All three methods optimize the same criterion (AIC) on the same data.
+
+#### 3.5 Comparing All Selection Methods
+
+```{r}
+#| label: compare-methods
+method_comparison <- tribble(
+  ~Method, ~`Variables selected`, ~`Adj. R²`, ~AIC, ~BIC,
+  "Maximum model",
+    length(coef(mod_max)) - 1,
+    round(glance(mod_max)$adj.r.squared, 4),
+    round(AIC(mod_max), 1),
+    round(BIC(mod_max), 1),
+  "Backward (AIC)",
+    length(coef(mod_backward)) - 1,
+    round(glance(mod_backward)$adj.r.squared, 4),
+    round(AIC(mod_backward), 1),
+    round(BIC(mod_backward), 1),
+  "Forward (AIC)",
+    length(coef(mod_forward)) - 1,
+    round(glance(mod_forward)$adj.r.squared, 4),
+    round(AIC(mod_forward), 1),
+    round(BIC(mod_forward), 1),
+  "Stepwise (AIC)",
+    length(coef(mod_stepwise)) - 1,
+    round(glance(mod_stepwise)$adj.r.squared, 4),
+    round(AIC(mod_stepwise), 1),
+    round(BIC(mod_stepwise), 1)
+)
+
+method_comparison |>
+  kable(caption = "Comparison of Variable Selection Methods") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:** All three automated methods selected the same model with `r length(coef(mod_backward)) - 1` predictor terms (Adjusted R² = `r round(glance(mod_backward)$adj.r.squared, 3)`, AIC = `r format(round(AIC(mod_backward), 1), big.mark = ",", nsmall = 1)`, BIC = `r format(round(BIC(mod_backward), 1), big.mark = ",", nsmall = 1)`). This model has a lower AIC and BIC than the maximum model (AIC = `r format(round(AIC(mod_max), 1), big.mark = ",", nsmall = 1)`, BIC = `r format(round(BIC(mod_max), 1), big.mark = ",", nsmall = 1)`), confirming that removing `r knitr::combine_words(removed)` improved parsimony without sacrificing fit. The improvement in BIC (`r round(BIC(mod_max) - BIC(mod_backward))` points lower) is larger than the AIC improvement (`r round(AIC(mod_max) - AIC(mod_backward))` points lower), consistent with BIC's stronger preference for simpler models. In practice, the maximum model and the selected model would produce very similar predictions, but the selected model is preferred for its efficiency.
+
+#### 3.6 Cautions About Automated Selection
+
+::: {.callout-warning}
+## Use automated selection with extreme caution.
+
+:::
+
+Automated methods (forward, backward, stepwise) have well-documented problems:
+
+1. **They ignore the research question.** The algorithm selects variables based purely on statistical fit. If you are building an associative model and the exposure is not statistically significant, the algorithm will remove it, which defeats the purpose.
+
+2. **They inflate Type I error.** The repeated testing involved in stepwise procedures inflates the probability of including spurious predictors.
+
+3. **They are path-dependent.** Forward and backward selection can yield different final models because the order of variable entry/removal matters.
+
+4. **They ignore subject-matter knowledge.** A variable may be a known confounder from the literature even if it is not statistically significant in your sample.
+
+5. **p-values and CIs from the final model are biased.** Because the model was selected to optimize fit, the reported p-values are anti-conservative (too small).
+
+::: {.callout-note}
+## Recommendation
+
+Use automated selection as an **exploratory tool** to generate candidate models, but make final decisions based on substantive knowledge, confounding assessment, and parsimony.
+:::
+
+### 4. Model Selection for Associative Models
+
+#### 4.1 A Different Philosophy
+
+In associative modeling, the **exposure variable is always in the model**. It is never a candidate for removal, regardless of its p-value. The question is which **covariates** to include alongside it.
+
+The standard epidemiological approach to covariate selection:
+
+1. Identify the exposure(s) of interest (these stay in the model)
+2. Identify candidate confounders from the literature and bivariate analyses
+3. Use the **10% change-in-estimate** rule to determine which confounders to retain
+
+#### 4.2 The 10% Change-in-Estimate Procedure
+
+Recall from the Confounding lecture: a covariate is a confounder if removing it changes the exposure coefficient by more than 10%.
+
+The systematic procedure:
+
+1. Fit the maximum model (exposure + all candidate confounders) and note the exposure $\hat{\beta}$
+2. Compute the 10% interval: $\hat{\beta} \pm 0.10 \times |\hat{\beta}|$
+3. Remove one candidate confounder at a time
+4. If the exposure $\hat{\beta}$ stays within the 10% interval, the removed variable is not a confounder (drop it)
+5. If the exposure $\hat{\beta}$ moves outside the interval, the variable is a confounder (keep it)
+6. Repeat until all covariates have been evaluated
+
+```{r}
+#| label: associative-selection
+# Exposure: exercise; Outcome: physhlth_days
+# Maximum associative model
+mod_assoc_max <- lm(physhlth_days ~ exercise + menthlth_days + sleep_hrs + age +
+                      sex + education + income_cat + bmi,
+                    data = brfss_ms)
+
+b_exposure_max <- coef(mod_assoc_max)["exerciseYes"]
+interval_low <- b_exposure_max - 0.10 * abs(b_exposure_max)
+interval_high <- b_exposure_max + 0.10 * abs(b_exposure_max)
+
+cat("Exposure coefficient in maximum model:", round(b_exposure_max, 4), "\n")
+cat("10% interval: (", round(interval_low, 4), ",", round(interval_high, 4), ")\n\n")
+
+# Systematically remove one covariate at a time
+covariates_to_test <- c("menthlth_days", "sleep_hrs", "age", "sex",
+                         "education", "income_cat", "bmi")
+
+assoc_table <- map_dfr(covariates_to_test, \(cov) {
+  # Build formula without this covariate
+  remaining <- setdiff(covariates_to_test, cov)
+  form <- as.formula(paste("physhlth_days ~ exercise +", paste(remaining, collapse = " + ")))
+  mod_reduced <- lm(form, data = brfss_ms)
+  b_reduced <- coef(mod_reduced)["exerciseYes"]
+  pct_change <- (b_reduced - b_exposure_max) / abs(b_exposure_max) * 100
+
+  tibble(
+    `Removed covariate` = cov,
+    `Exercise β (max)` = round(b_exposure_max, 4),
+    `Exercise β (without)` = round(b_reduced, 4),
+    `% Change` = round(pct_change, 1),
+    `Within 10%?` = ifelse(abs(pct_change) <= 10, "Yes (drop)", "No (keep)"),
+    Confounder = ifelse(abs(pct_change) > 10, "Yes", "No")
+  )
+})
+
+assoc_table |>
+  kable(caption = "Associative Model: Systematic Confounder Assessment for Exercise") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(6, bold = TRUE)
+```
+
+```{r}
+#| label: assoc-summary
+#| include: false
+conf_rows <- assoc_table |> filter(Confounder == "Yes")
+b_without <- function(v) assoc_table$`Exercise β (without)`[assoc_table$`Removed covariate` == v]
+pct_of    <- function(v) abs(assoc_table$`% Change`[assoc_table$`Removed covariate` == v])
+```
+
+**Interpretation:** The exercise coefficient in the maximum associative model is `r round(b_exposure_max, 2)`, meaning exercisers report about `r round(abs(b_exposure_max))` `r more_fewer(b_exposure_max)` physically unhealthy days after adjusting for all covariates. The systematic assessment identifies **`r nrow(conf_rows)` confounders**: `r paste0(conf_rows[["Removed covariate"]], " (", abs(conf_rows[["% Change"]]), "% change when removed)", collapse = " and ")`. Removing age `r if (b_without("age") < b_exposure_max) "strengthens" else "weakens"` the exercise effect (to `r round(b_without("age"), 2)`): older adults exercise less and have more unhealthy days, so ignoring age makes exercise look `r if (b_without("age") < b_exposure_max) "more" else "less"` protective than it is. Removing income `r if (b_without("income_cat") < b_exposure_max) "also strengthens" else "weakens"` the effect (to `r round(b_without("income_cat"), 2)`), with a similar mechanism: higher income goes with both more exercise and fewer unhealthy days. The remaining covariates all produce changes within the 10% interval (mental health days comes closest, at `r pct_of("menthlth_days")`%), so they are not confounders and could be dropped from the associative model. The one-at-a-time assessment points to `r knitr::combine_words(conf_rows[["Removed covariate"]])` as the confounders to keep.
+
+**Checking the confounders together.** Removing covariates one at a time can miss their joint effect: two covariates that each move the exposure coefficient by less than 10% can move it by more when both are dropped. So the last step is to fit the proposed final model and compare its exercise coefficient with the maximum model.
+
+```{r}
+#| label: assoc-final
+# Fit the proposed final model (exposure + confounders found one at a time)
+conf_vars <- conf_rows[["Removed covariate"]]
+fit_final <- function(vars) lm(reformulate(c("exercise", vars), "physhlth_days"), data = brfss_ms)
+pct_from_max <- function(fit) (coef(fit)["exerciseYes"] - b_exposure_max) / abs(b_exposure_max) * 100
+
+mod_conf_only <- fit_final(conf_vars)
+pct_conf_only <- pct_from_max(mod_conf_only)
+
+# If the joint change is outside 10%, add back the dropped covariates, closest
+# call first, until the exercise coefficient is back inside the 10% interval
+add_order <- assoc_table |>
+  filter(Confounder == "No") |>
+  arrange(desc(abs(`% Change`))) |>
+  pull(`Removed covariate`)
+kept <- conf_vars
+mod_assoc_final <- mod_conf_only
+for (v in add_order) {
+  if (abs(pct_from_max(mod_assoc_final)) <= 10) break
+  kept <- c(kept, v)
+  mod_assoc_final <- fit_final(kept)
+}
+
+tibble(
+  Model = c("Maximum", paste("exercise +", paste(conf_vars, collapse = " + ")),
+            paste("exercise +", paste(kept, collapse = " + "))),
+  `Exercise β` = round(c(b_exposure_max, coef(mod_conf_only)["exerciseYes"],
+                         coef(mod_assoc_final)["exerciseYes"]), 3),
+  `% Change from maximum` = round(c(0, pct_conf_only, pct_from_max(mod_assoc_final)), 1)
+) |>
+  distinct() |>
+  kable(caption = "Joint check: the exercise coefficient in the final associative model") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+With only `r knitr::combine_words(conf_vars)`, the exercise coefficient is `r round(coef(mod_conf_only)["exerciseYes"], 2)`, a `r round(abs(pct_conf_only), 1)`% change from the maximum model: `r if (abs(pct_conf_only) <= 10) "inside the 10% interval, so this is the final associative model." else paste0("outside the 10% interval, so the dropped covariates matter together. Adding back ", knitr::combine_words(setdiff(kept, conf_vars)), " (the closest call in the table) brings it to ", round(coef(mod_assoc_final)["exerciseYes"], 2), " (", round(abs(pct_from_max(mod_assoc_final)), 1), "%), inside the interval. The final associative model is exercise + ", paste(kept, collapse = " + "), ".")`
+
+#### 4.3 Associative Models with Interactions
+
+If a statistically significant interaction is present (from the previous lecture), the approach changes:
+
+1. **Stratify** by the effect modifier
+2. Within each stratum, apply the 10% change-in-estimate procedure separately
+3. Report stratum-specific results
+
+For example, if age $\times$ exercise is significant:
+
+- For exercisers: fit `physhlth_days ~ age + [confounders]` and assess confounding
+- For non-exercisers: fit the same and assess confounding
+- The set of confounders may differ between strata
+
+#### 4.4 Predictive vs. Associative: Side-by-Side Comparison
+
+```{r}
+#| label: side-by-side
+#| echo: false
+tibble(
+  Feature = c("Exposure variable", "Covariate selection", "Automated methods",
+              "10% change rule", "Interaction terms", "Primary criterion",
+              "Parsimony"),
+  Predictive = c("No fixed exposure", "Based on statistical fit",
+                  "Useful (with caution)", "Not used",
+                  "Include if improves prediction", "Adj. R², AIC, BIC",
+                  "Fewer variables = less overfitting"),
+  Associative = c("Always in the model", "Based on confounding assessment",
+                   "Generally inappropriate", "Primary tool",
+                   "Include if effect modification is present",
+                   "Validity of exposure β",
+                   "Fewer variables = more efficient, if not confounders")
+) |>
+  kable(caption = "Predictive vs. Associative Model Building") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE)
+```
+
+### 5. Cross-Validation: Evaluating Model Reliability
+
+#### 5.1 Why Cross-Validate?
+
+A model that fits the training data well may perform poorly on new data (overfitting). **Cross-validation** estimates how well the model would perform on data it has not seen.
+
+The simplest approach is **k-fold cross-validation**:
+
+1. Randomly split the data into $k$ equally sized folds
+2. For each fold, train the model on the other $k - 1$ folds and predict on the held-out fold
+3. Average the prediction error across all $k$ folds
+
+```{r}
+#| label: cross-validation
+# 10-fold cross-validation comparison
+set.seed(1220)
+n <- nrow(brfss_ms)
+k_folds <- 10
+fold_id <- sample(rep(1:k_folds, length.out = n))
+
+# Compare a small model, medium model, and full model
+cv_results <- map_dfr(1:k_folds, \(fold) {
+  train <- brfss_ms[fold_id != fold, ]
+  test  <- brfss_ms[fold_id == fold, ]
+
+  # Small model
+  m_small <- lm(physhlth_days ~ menthlth_days + gen_health, data = train)
+  pred_small <- predict(m_small, newdata = test)
+
+  # Medium model
+  m_med <- lm(physhlth_days ~ menthlth_days + gen_health + exercise + age + sleep_hrs,
+              data = train)
+  pred_med <- predict(m_med, newdata = test)
+
+  # Full model
+  m_full <- lm(physhlth_days ~ menthlth_days + sleep_hrs + age + sex + education +
+                 exercise + gen_health + income_cat + bmi, data = train)
+  pred_full <- predict(m_full, newdata = test)
+
+  tibble(
+    fold = fold,
+    RMSE_small = sqrt(mean((test$physhlth_days - pred_small)^2)),
+    RMSE_medium = sqrt(mean((test$physhlth_days - pred_med)^2)),
+    RMSE_full = sqrt(mean((test$physhlth_days - pred_full)^2))
+  )
+})
+
+cv_summary <- cv_results |>
+  summarise(
+    across(starts_with("RMSE"), \(x) round(mean(x), 3))
+  )
+
+tribble(
+  ~Model, ~Predictors, ~`CV RMSE`,
+  "Small", "menthlth_days + gen_health", cv_summary$RMSE_small,
+  "Medium", "+ exercise + age + sleep_hrs", cv_summary$RMSE_medium,
+  "Full", "All 9 predictors", cv_summary$RMSE_full
+) |>
+  kable(caption = "10-Fold Cross-Validation: Out-of-Sample RMSE") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-tip}
+## Interpretation
+
+RMSE is the average prediction error in the units of the outcome (days). A lower CV RMSE indicates better out-of-sample prediction. If the full model has a similar CV RMSE to the medium model, the additional predictors are not improving prediction and may represent overfitting. Here the medium model (`r cv_summary$RMSE_medium`) and the full model (`r cv_summary$RMSE_full`) predict equally well, and both beat the small model (`r cv_summary$RMSE_small`) only slightly.
+:::
+
+### Summary of Key Concepts
+
+| Concept | Key Point |
+|---------|-----------|
+| Maximum model | Start with all candidate predictors from literature and research question |
+| Overfitting vs. underfitting | Overfitting = more variance; underfitting = bias |
+| Parsimony | Simplest model that captures the important relationships |
+| $R^2$ | Always increases with more variables; useless alone for comparison |
+| Adjusted $R^2$ | Penalizes complexity; maximize it |
+| AIC | Balances fit and complexity; minimize it |
+| BIC | Heavier penalty than AIC; favors simpler models; minimize it |
+| Partial F-test | Compares reduced to maximum model |
+| Best subsets | Exhaustive search; `leaps::regsubsets()` |
+| Backward elimination | Start full, remove highest p-value; `step(direction = "backward")` |
+| Forward selection | Start empty, add lowest p-value; `step(direction = "forward")` |
+| Stepwise | Forward + backward at each step; `step(direction = "both")` |
+| Caution | Automated methods ignore research questions and inflate Type I error |
+| Associative models | Exposure stays in model; use 10% change-in-estimate for covariates |
+| Cross-validation | Estimates out-of-sample performance; protects against overfitting |
+
+## Part 2: In-Class Lab Activity
+
+### Instructions
+
+In this lab, you will practice both predictive and associative model selection using the BRFSS 2020 dataset. Work through each task systematically. You may discuss concepts with classmates, but your written answers and R code must be your own.
+
+[Download the lab template (.qmd)](../labs/templates/template-model-selection-lab.qmd){.btn .btn-sm .btn-outline-primary download="model-selection-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_Model_Selection_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `physhlth_days` | Physically unhealthy days in past 30 | Continuous (0--30) |
+| `menthlth_days` | Mentally unhealthy days in past 30 | Continuous (0--30) |
+| `sleep_hrs` | Sleep hours per night | Continuous (1--14) |
+| `age` | Age in years (capped at 80) | Continuous |
+| `sex` | Sex (Male/Female) | Factor |
+| `education` | Education level (4 categories) | Factor |
+| `exercise` | Any physical activity (Yes/No) | Factor |
+| `gen_health` | General health status (5 categories) | Factor |
+| `income_cat` | Household income (1--8 ordinal) | Numeric |
+| `bmi` | Body mass index | Continuous |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(leaps)
+library(MASS)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("PHYSHLTH", "SLEPTIM1", "MENTHLTH", "_AGE80", "SEXVAR", "EDUCA",
+           "EXERANY2", "GENHLTH", "INCOME2", "_BMI5")
+) |>
+  janitor::clean_names()
+
+brfss_ms <- brfss_full |>
+  mutate(
+    # Outcome
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    # Candidate predictors
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_)
+  ) |>
+  filter(
+    !is.na(physhlth_days), !is.na(menthlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(education),
+    !is.na(exercise), !is.na(gen_health), !is.na(income_cat), !is.na(bmi)
+  )
+
+set.seed(1220)
+brfss_ms <- brfss_ms |>
+  dplyr::select(physhlth_days, menthlth_days, sleep_hrs, age, sex,
+                education, exercise, gen_health, income_cat, bmi) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Maximum Model and Criteria Comparison (15 points)
+
+**1a. (5 pts)** Fit the maximum model predicting `physhlth_days` from all 9 candidate predictors. Report $R^2$, Adjusted $R^2$, AIC, and BIC.
+
+**1b. (5 pts)** Now fit a "minimal" model using only `menthlth_days` and `age`. Report the same four criteria. How do the two models compare?
+
+**1c. (5 pts)** Explain why $R^2$ is a poor criterion for comparing these two models. What makes Adjusted $R^2$, AIC, and BIC better choices?
+
+### Task 2: Best Subsets Regression (20 points)
+
+**2a. (5 pts)** Use `leaps::regsubsets()` to perform best subsets regression with `nvmax = 15`. Create a plot of Adjusted $R^2$ vs. number of variables. At what model size does Adjusted $R^2$ plateau?
+
+**2b. (5 pts)** Create a plot of BIC vs. number of variables. Which model size minimizes BIC?
+
+**2c. (5 pts)** Identify the variables included in the BIC-best model. Fit this model explicitly using `lm()` and report its coefficients.
+
+**2d. (5 pts)** Compare the BIC-best model to the Adjusted $R^2$-best model. Are they the same? If not, which would you prefer and why?
+
+### Task 3: Automated Selection Methods (20 points)
+
+**3a. (5 pts)** Perform backward elimination using `step()` with AIC as the criterion. Which variables are removed? Which remain?
+
+**3b. (5 pts)** Perform forward selection using `step()`. Does it arrive at the same model as backward elimination?
+
+**3c. (5 pts)** Compare the backward, forward, and stepwise results in a single table showing the number of variables, Adjusted $R^2$, AIC, and BIC for each.
+
+**3d. (5 pts)** List three reasons why you should not blindly trust the results of automated variable selection. Which of these concerns is most relevant for epidemiological research?
+
+### Task 4: Associative Model Building (25 points)
+
+For this task, the **exposure** is `sleep_hrs` and the **outcome** is `physhlth_days`. You are building an associative model to estimate the effect of sleep on physical health.
+
+**4a. (5 pts)** Fit the crude model: `physhlth_days ~ sleep_hrs`. Report the sleep coefficient.
+
+**4b. (10 pts)** Fit the maximum associative model: `physhlth_days ~ sleep_hrs + [all other covariates]`. Note the adjusted sleep coefficient and compute the 10% interval. Then systematically remove each covariate one at a time and determine which are confounders using the 10% rule. Present your results in a summary table.
+
+**4c. (5 pts)** Fit the final associative model including only sleep and the identified confounders. Report the sleep coefficient and its 95% CI.
+
+**4d. (5 pts)** A reviewer asks: "Why didn't you just use stepwise selection?" Write a **3--4 sentence response** explaining why automated selection is inappropriate for this associative analysis.
+
+### Task 5: Synthesis (20 points)
+
+**5a. (10 pts)** You have now built two models for the same data:
+
+- A **predictive** model (from Task 2 or 3, the best model by AIC/BIC)
+- An **associative** model (from Task 4, focused on sleep)
+
+Compare these two models: Do they include the same variables? Is the sleep coefficient similar? Why might they differ?
+
+**5b. (10 pts)** Write a **4--5 sentence paragraph** for a public health audience describing the results of your associative model. Include:
+
+- The adjusted effect of sleep on physical health days
+- Which variables needed to be accounted for (confounders)
+- The direction and approximate magnitude of the association
+- A caveat about cross-sectional data
+
+Do not use statistical jargon.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

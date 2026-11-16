@@ -2,12 +2,12 @@
 
 How the EPI 553 lecture notes moved from RPubs to <https://epi553.muntasirmasum.com>, how to keep working on the site, and what is left to do.
 
-## Status (November 12, 2026)
+## Status (November 16, 2026)
 
 - **Live:** <https://epi553.muntasirmasum.com>, served by GitHub Pages from the `gh-pages` branch of [muntasirmasum/epi553](https://github.com/muntasirmasum/epi553). HTTPS is enforced.
 - **DNS:** CNAME record `epi553 → muntasirmasum.github.io` in Vercel DNS for muntasirmasum.com. The main site and its other records are unchanged.
-- **Converted:** Lectures 01 to 05, Labs 1 to 3, and the four resource pages (Batch 1, published November 12, 2026).
-- **Remaining:** Lectures 06 to 18 in three batches: linear regression (06 to 11), logistic models (12 to 15), and counts, survival, and visualization (16 to 18). Each batch is converted, checked, reviewed by Muntasir, then published.
+- **Converted:** Lectures 01 to 05, Labs 1 to 3, and the four resource pages (Batch 1, published November 12, 2026); Lectures 06 to 11 with lab templates for every lecture lab (Batch 2, published November 16, 2026).
+- **Remaining:** Lectures 12 to 18 in two batches: logistic models (12 to 15), and counts, survival, and visualization (16 to 18). Each batch is converted, checked, reviewed by Muntasir, then published.
 - **Local copy:** `~/epi553`, also reachable as `epi553-site` inside the Spring 2027 `epi553` folder. The Spring 2026 sources are reachable as `Epi 553` in the same folder.
 
 ## Why this setup
@@ -64,7 +64,7 @@ Repeat this for each remaining lecture. Simple Linear Regression (`lectures/simp
    - Interactive plotly figures cannot take `fig-alt`. Add a `[Figure description: ...]{.visually-hidden}` line after the chunk.
    - When a figure's numbers can change with the data, compute the alt text: `#| fig-alt: !expr sprintf("... %.1f ...", value)`. The objects must exist before the chunk runs, and the expression must not contain a colon followed by a space (YAML reads it as a key).
    - Run the checker (below) and fix every violation, in light and dark mode at 1280 and 320 pixels wide.
-10. **Nothing to add to the sidebar:** it lists every `lectures/*.qmd` (and `labs/lab-*.qmd`, `resources/*.qmd`) and sorts by `order`. Student templates go in `labs/templates/template-*.qmd` or `resources/templates/`, which are copied to the site but not rendered.
+10. **Nothing to add to the sidebar:** it lists every `lectures/*.qmd` (and `labs/lab-*.qmd`, `resources/*.qmd`) and sorts by `order`. Student templates go in `labs/templates/template-*.qmd` or `resources/templates/`, which are copied to the site but not rendered. For a lecture lab, build the template with `python3 tools/convert/lab_template.py lectures/<slug>.qmd labs/templates/template-<slug>-lab.qmd "<Title> Lab"` (it needs a `lab-setup` chunk and `### Task N` headings), add a download button to the lab intro, and render the template on its own to check it.
 11. **Check against the published version.** Compare key numbers (coefficients, odds ratios, p-values, test statistics) with the RPubs HTML. Read every sentence that states a conclusion: hard-coded words like "reject" or "significant" must agree with the numbers. Make them follow the result with inline R, as in the pilot's hypothesis test.
 12. **Publish** (workflow above).
 
@@ -88,12 +88,6 @@ Paths are relative to `Spring 2026/Epi 553/Lectures Notes/`. Lecture numbers fol
 
 | # | Lecture | Published source | Data | Notes |
 |---|---------|------------------|------|-------|
-| 06 | Multiple Linear Regression | `Multiple Linear Regression/MLR_Lecture.Rmd` | BRFSS 2020 | Source was edited after its last publish; compare carefully |
-| 07 | Tests of Hypotheses in MLR | `Tests of Hypotheses/Tests_of_Hypotheses_Lecture.Rmd` | BRFSS 2020 | Read the MLR sample in Spring 2026 |
-| 08 | Dummy Variables | `Dummy Variables/Dummy_Variables_Lecture.Rmd` | BRFSS 2020 | |
-| 09 | Confounding and Interactions | `Confounding Interaction/Confounding_Interaction_Lecture.Rmd` | BRFSS 2020 | |
-| 10 | Model Selection | `Model Selection/Model_Selection_Lecture.Rmd` | BRFSS 2020 | |
-| 11 | Regression Diagnostics | `Diagnostics/Diagnostics_Lecture.Rmd` | BRFSS 2020 | |
 | 12 | Logistic Regression Part 1 | `Logistic Regression/Logistic_Regression_Part1_Lecture.Rmd` | BRFSS 2020 | Builds the logistic sample later lectures reuse |
 | 13 | Logistic Regression Part 2 | `Logistic Regression/Logistic_Regression_Part2_Lecture.Rmd` | BRFSS 2020 | Read Part 1's sample |
 | 14 | Polytomous and Ordinal Logistic | `Polytomous Regression/Polytomous_Regression_Lecture.Rmd` | BRFSS 2020 | |
@@ -116,6 +110,7 @@ TA lab solutions (`*_Lab_Solution_TA.*`), anything in `Final Paper/` (student wo
   - Simple Linear Regression: the lab now uses the lecture's 3,000 adults, and the published version's conclusion was wrong (see below).
   - Lab 1 (adults only now) and Lab 2 (Part A drops underweight adults; Part B uses the 2009-2010 cycle only).
   - The Statistical Modeling lab (the BRFSS 2023 sample was redefined).
+  - Batch 2 labs keep their samples, so their solutions stay valid except: Multiple Linear Regression Task 5a (Residuals vs. Leverage instead of Cook's distance), Dummy Variables Task 4b (coefficients for age, sex, physical health days, and sleep), and the Tests of Hypotheses pair lab (one shared file per pair).
   The Batch 1 change log lists every content change.
 - **Content to review in the pilot.**
   - The learning objectives are new text.

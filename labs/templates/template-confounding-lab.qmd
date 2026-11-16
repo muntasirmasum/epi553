@@ -1,0 +1,280 @@
+---
+title: "Confounding and Interaction Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(car)
+library(ggeffects)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("PHYSHLTH", "SLEPTIM1", "MENTHLTH", "_AGE80", "SEXVAR", "EDUCA",
+           "EXERANY2", "GENHLTH", "INCOME2")
+) |>
+  janitor::clean_names()
+
+brfss_ci <- brfss_full |>
+  mutate(
+    # Outcome: physically unhealthy days in past 30
+    physhlth_days = case_when(
+      physhlth == 88                    ~ 0,
+      physhlth >= 1 & physhlth <= 30   ~ as.numeric(physhlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Primary exposure: sleep hours
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14   ~ as.numeric(sleptim1),
+      TRUE                             ~ NA_real_
+    ),
+    # Mentally unhealthy days (covariate)
+    menthlth_days = case_when(
+      menthlth == 88                    ~ 0,
+      menthlth >= 1 & menthlth <= 30   ~ as.numeric(menthlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Age
+    age = age80,
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Education (4-level)
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    # Exercise in past 30 days
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    # General health status
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    # Income category (ordinal 1-8)
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(menthlth_days),
+    !is.na(age), age >= 18,
+    !is.na(sex),
+    !is.na(education),
+    !is.na(exercise),
+    !is.na(gen_health),
+    !is.na(income_cat)
+  )
+
+# Reproducible random sample
+set.seed(1220)
+brfss_ci <- brfss_ci |>
+  select(physhlth_days, sleep_hrs, menthlth_days, age, sex,
+         education, exercise, gen_health, income_cat) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Exploratory Data Analysis (15 points)
+
+**1a. (5 pts)** Create a scatterplot of `physhlth_days` (y-axis) vs. `age` (x-axis), colored by `exercise` status. Add separate regression lines for each group. Describe the pattern you observe.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Compute the mean `physhlth_days` for each combination of `sex` and `exercise`. Present the results in a table. Does it appear that the association between exercise and physical health days might differ by sex?
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Create a scatterplot of `physhlth_days` vs. `sleep_hrs`, faceted by `education` level. Comment on whether the slopes appear similar or different across education groups.
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: Stratified Analysis for Interaction (15 points)
+
+**2a. (5 pts)** Fit separate simple linear regression models of `physhlth_days ~ age` for exercisers and non-exercisers. Report the slope, SE, and 95% CI for age in each stratum.
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Create a single plot showing the two fitted regression lines (one per exercise group) overlaid on the data. Are the lines approximately parallel?
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** Can you formally test whether the two slopes are different using only the stratified results? Explain why or why not.
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+## Task 3: Interaction via Regression (25 points)
+
+**3a. (5 pts)** Fit the interaction model: `physhlth_days ~ age * exercise`. Write out the fitted equation.
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (5 pts)** Using the fitted equation, derive the stratum-specific equations for exercisers and non-exercisers. Verify that these match the stratified analysis from Task 2.
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (5 pts)** Conduct the t-test for the interaction term (`age:exerciseYes`). State the null and alternative hypotheses, report the test statistic and p-value, and state your conclusion about whether interaction is present.
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+**3d. (5 pts)** Now fit a model with an interaction between age and education: `physhlth_days ~ age * education`. How many interaction terms are produced? Use a partial F-test to test whether the age $\times$ education interaction as a whole is significant.
+
+```{r}
+#| label: task-3d
+
+```
+
+*Your answer:*
+
+**3e. (5 pts)** Create a visualization using `ggpredict()` showing the predicted `physhlth_days` by age for each education level. Do the lines appear parallel?
+
+```{r}
+#| label: task-3e
+
+```
+
+*Your answer:*
+
+## Task 4: Confounding Assessment (25 points)
+
+For this task, the **exposure** is `exercise` and the **outcome** is `physhlth_days`.
+
+**4a. (5 pts)** Fit the crude model: `physhlth_days ~ exercise`. Report the exercise coefficient. This is the unadjusted estimate.
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (10 pts)** Systematically assess whether each of the following is a confounder of the exercise-physical health association: `age`, `sex`, `sleep_hrs`, `education`, and `income_cat`. For each:
+
+- Fit the model `physhlth_days ~ exercise + [covariate]`
+- Report the adjusted exercise coefficient
+- Compute the percent change from the crude estimate
+- Apply the 10% rule to determine if the variable is a confounder
+
+Present your results in a single summary table.
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** Fit a fully adjusted model including exercise and all identified confounders. Report the exercise coefficient and compare it to the crude estimate. How much did the estimate change overall?
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+**4d. (5 pts)** Is `gen_health` a confounder or a mediator of the exercise-physical health relationship? Could it be both? Explain your reasoning with reference to the three conditions for confounding and the concept of the causal pathway.
+
+```{r}
+#| label: task-4d
+
+```
+
+*Your answer:*
+
+## Task 5: Public Health Interpretation (20 points)
+
+**5a. (10 pts)** Based on your analyses, write a **4--5 sentence paragraph** for a public health audience summarizing:
+
+- Whether the association between exercise and physical health differs by any subgroup (interaction assessment)
+- Which variables confounded the exercise-physical health association
+- The direction and approximate magnitude of the adjusted exercise effect
+- Appropriate caveats about cross-sectional data and potential unmeasured confounding
+
+Do not use statistical jargon.
+
+```{r}
+#| label: task-5a
+
+```
+
+*Your answer:*
+
+**5b. (10 pts)** A colleague suggests including `gen_health` as a covariate in the final model because it changes the exercise coefficient by more than 10%. You disagree. Write a **3--4 sentence argument** explaining why adjusting for general health may not be appropriate if the goal is to estimate the total effect of exercise on physical health days. Use the concept of mediation in your argument.
+
+```{r}
+#| label: task-5b
+
+```
+
+*Your answer:*

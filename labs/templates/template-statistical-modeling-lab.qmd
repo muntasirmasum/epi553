@@ -1,0 +1,262 @@
+---
+title: "Statistical Modeling Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(car)
+library(ggeffects)
+library(knitr)
+library(kableExtra)
+
+# Read the BRFSS 2023 variables this lecture uses (CDC names)
+brfss_raw <- read_brfss(
+  2023,
+  vars = c("DIABETE4", "_AGE_G", "_SEX", "_RACE", "_EDUCAG", "_INCOMG1",
+           "_BMI5CAT", "EXERANY2", "SMOKE100", "SMOKDAY2", "GENHLTH",
+           "_RFHYPE6", "_RFCHOL3")
+) |>
+  janitor::clean_names()
+
+# Recode on the full file. Codes 7 ("don't know") and 9 ("refused" or
+# "missing") become NA so they are never counted as "no".
+brfss_recoded <- brfss_raw |>
+  mutate(
+    # Outcome: diagnosed diabetes (gestational-only and prediabetes count as no)
+    diabetes = case_when(
+      diabete4 == 1 ~ 1,
+      diabete4 %in% c(2, 3, 4) ~ 0
+    ),
+    age_group = factor(case_when(
+      age_g == 1 ~ "18-24",
+      age_g == 2 ~ "25-34",
+      age_g == 3 ~ "35-44",
+      age_g == 4 ~ "45-54",
+      age_g == 5 ~ "55-64",
+      age_g == 6 ~ "65+"
+    ), levels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+")),
+    # Age as a number: the midpoint of each age group
+    age_cont = case_when(
+      age_g == 1 ~ 21,
+      age_g == 2 ~ 29.5,
+      age_g == 3 ~ 39.5,
+      age_g == 4 ~ 49.5,
+      age_g == 5 ~ 59.5,
+      age_g == 6 ~ 70
+    ),
+    sex = factor(ifelse(sex == 1, "Male", "Female")),
+    race = factor(case_when(
+      race == 1 ~ "White",
+      race == 2 ~ "Black",
+      race == 3 ~ "Native American",
+      race == 4 ~ "Asian",
+      race == 5 ~ "Native Hawaiian/PI",
+      race == 6 ~ "Other",
+      race == 7 ~ "Multiracial",
+      race == 8 ~ "Hispanic"
+    ), levels = c("White", "Black", "Hispanic", "Asian", "Native American",
+                  "Native Hawaiian/PI", "Other", "Multiracial")),
+    education = factor(case_when(
+      educag == 1 ~ "< High school",
+      educag == 2 ~ "High school graduate",
+      educag == 3 ~ "Some college",
+      educag == 4 ~ "College graduate"
+    ), levels = c("< High school", "High school graduate", "Some college", "College graduate")),
+    # Income: the seven 2023 categories (9 = don't know or missing)
+    income = factor(case_when(
+      incomg1 == 1 ~ "< $15,000",
+      incomg1 == 2 ~ "$15,000-$24,999",
+      incomg1 == 3 ~ "$25,000-$34,999",
+      incomg1 == 4 ~ "$35,000-$49,999",
+      incomg1 == 5 ~ "$50,000-$99,999",
+      incomg1 == 6 ~ "$100,000-$199,999",
+      incomg1 == 7 ~ "$200,000+"
+    ), levels = c("< $15,000", "$15,000-$24,999", "$25,000-$34,999",
+                  "$35,000-$49,999", "$50,000-$99,999", "$100,000-$199,999",
+                  "$200,000+")),
+    bmi_cat = factor(case_when(
+      bmi5cat == 1 ~ "Underweight",
+      bmi5cat == 2 ~ "Normal",
+      bmi5cat == 3 ~ "Overweight",
+      bmi5cat == 4 ~ "Obese"
+    ), levels = c("Normal", "Underweight", "Overweight", "Obese")),  # Normal weight is the reference
+    # Any physical activity in the past 30 days
+    phys_active = case_when(exerany2 == 1 ~ 1, exerany2 == 2 ~ 0),
+    # Current smoking: SMOKDAY2 is asked only of people who have smoked at
+    # least 100 cigarettes (SMOKE100 = 1), so never-smokers count as 0
+    current_smoker = case_when(
+      smoke100 == 2 ~ 0,
+      smokday2 %in% c(1, 2) ~ 1,
+      smokday2 == 3 ~ 0
+    ),
+    gen_health = factor(case_when(
+      genhlth %in% c(1, 2) ~ "Excellent/Very good",
+      genhlth == 3 ~ "Good",
+      genhlth %in% c(4, 5) ~ "Fair/Poor"
+    ), levels = c("Excellent/Very good", "Good", "Fair/Poor")),
+    hypertension = case_when(rfhype6 == 2 ~ 1, rfhype6 == 1 ~ 0),
+    high_chol = case_when(rfchol3 == 2 ~ 1, rfchol3 == 1 ~ 0)
+  )
+
+# Keep complete cases on the analysis variables, then draw 2,000 people
+set.seed(553)
+brfss_clean <- brfss_recoded |>
+  select(diabetes, age_group, age_cont, sex, race, education, income,
+         bmi_cat, phys_active, current_smoker, gen_health,
+         hypertension, high_chol) |>
+  drop_na() |>
+  slice_sample(n = 2000)
+```
+
+## Task 1: Explore the Outcome Variable
+
+```{r}
+#| label: lab-task1
+# YOUR CODE HERE: Create a frequency table of hypertension status
+
+# YOUR CODE HERE: Calculate the prevalence of hypertension by age group
+
+```
+
+**Questions:**
+
+a) What is the overall prevalence of hypertension in the dataset?
+b) How does hypertension prevalence vary by age group?
+
+*Your answer:*
+
+## Task 2: Build a Simple Logistic Regression Model
+
+```{r}
+#| label: lab-task2
+# YOUR CODE HERE: Fit a simple logistic regression model
+# Outcome: hypertension
+# Predictor: age_cont
+
+# YOUR CODE HERE: Display the results with odds ratios
+
+```
+
+**Questions:**
+
+a) What is the odds ratio for age? Interpret this value.
+b) Is the association statistically significant?
+c) What is the 95% confidence interval for the odds ratio?
+
+*Your answer:*
+
+## Task 3: Create a Multiple Regression Model
+
+```{r}
+#| label: lab-task3
+# YOUR CODE HERE: Fit a multiple logistic regression model
+# Outcome: hypertension
+# Predictors: age_cont, sex, bmi_cat, phys_active, current_smoker
+
+# YOUR CODE HERE: Display the results
+
+```
+
+**Questions:**
+
+a) How did the odds ratio for age change after adjusting for other variables?
+b) What does this suggest about confounding?
+c) Which variables are the strongest predictors of hypertension?
+
+*Your answer:*
+
+## Task 4: Interpret Dummy Variables
+
+```{r}
+#| label: lab-task4
+# YOUR CODE HERE: Create a table showing the dummy variable coding for bmi_cat
+
+# YOUR CODE HERE: Extract and display the odds ratios for BMI categories
+
+```
+
+**Questions:**
+
+a) What is the reference category for BMI?
+b) Interpret the odds ratio for "Obese" compared to the reference category.
+c) How would you explain this to a non-statistician?
+
+*Your answer:*
+
+## Task 5: Test for Interaction
+
+```{r}
+#| label: lab-task5
+# YOUR CODE HERE: Fit a model with Age × BMI interaction
+# Test if the effect of age on hypertension differs by BMI category
+
+# YOUR CODE HERE: Perform a likelihood ratio test comparing models with and without interaction
+
+```
+
+**Questions:**
+
+a) Is the interaction term statistically significant?
+b) What does this mean in epidemiologic terms (effect modification)?
+c) Create a visualization showing predicted probabilities by age and BMI category
+
+*Your answer:*
+
+## Task 6: Model Diagnostics
+
+```{r}
+#| label: lab-task6
+# YOUR CODE HERE: Calculate VIF for your multiple regression model
+
+# YOUR CODE HERE: Create a Cook's distance plot to identify influential observations
+
+```
+
+**Questions:**
+
+a) Are there any concerns about multicollinearity?
+b) Are there any influential observations that might affect your results?
+c) What would you do if you found serious violations?
+
+*Your answer:*
+
+## Task 7: Model Comparison
+
+```{r}
+#| label: lab-task7
+# YOUR CODE HERE: Compare three models using AIC and BIC
+# Model A: Age only
+# Model B: Age + sex + bmi_cat
+# Model C: Age + sex + bmi_cat + phys_active + current_smoker
+
+# YOUR CODE HERE: Create a comparison table
+
+```
+
+**Questions:**
+
+a) Which model has the best fit based on AIC?
+b) Is the added complexity of the full model justified?
+c) Which model would you choose for your final analysis? Why?
+
+*Your answer:*
+
+## Lab Report Guidelines
+
+Write a brief report (1-2 pages) summarizing your findings:
+
+1. **Introduction**: State your research question
+2. **Methods**: Describe your analytic approach
+3. **Results**: Present key findings with tables and figures
+4. **Interpretation**: Explain what your results mean
+5. **Limitations**: Discuss potential issues with your analysis

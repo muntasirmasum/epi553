@@ -1,0 +1,1522 @@
+---
+title: "Regression Diagnostics"
+subtitle: "Check a fitted model's assumptions, find outliers and influential points, and spot collinearity."
+description: "Residual types, residual and Q-Q plots, transformations, leverage, Cook's distance, DFFITS and DFBETAS, and variance inflation factors, with eight simulated plot-reading examples, using mentally unhealthy days in BRFSS 2020."
+order: 11
+unit: "Linear regression"
+categories: [Linear regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- compute raw, standardized, studentized, and jackknife residuals and say what each is for;
+- read residual, Q-Q, scale-location, and leverage plots to check the LINE assumptions;
+- try a transformation of the outcome and judge whether it helped;
+- find outliers with a Bonferroni-corrected jackknife test, and influential points with leverage, Cook's distance, DFFITS, and DFBETAS;
+- measure collinearity with the variance inflation factor and reduce structural collinearity by centering;
+- recognize the classic diagnostic patterns in simulated examples.
+:::
+
+## Introduction
+
+After fitting a regression model, we must ask: **does the model actually fit the data well, and are the underlying assumptions satisfied?** A model that violates key assumptions may produce misleading coefficients, invalid standard errors, or unreliable predictions.
+
+Regression diagnostics address three fundamental questions:
+
+1. **Are the regression assumptions satisfied?** (Linearity, Independence, Normality, Equal Variance)
+2. **Is there multicollinearity among predictors?** (Inflated standard errors, unstable coefficients)
+3. **Are there influential observations?** (Outliers, high-leverage points that distort the fitted model)
+
+This lecture provides the tools to diagnose each of these issues and, where possible, apply remedial measures. Diagnostics should be a routine part of every regression analysis, not an afterthought.
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(car)
+```
+
+### The BRFSS 2020 Dataset
+
+We continue with the BRFSS 2020 dataset. For this lecture, we predict **mentally unhealthy days** from several health-related variables.
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode eight variables and draw a random sample of 5,000 adults with complete data.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the eight BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2")
+) |>
+  janitor::clean_names()
+```
+
+```{r}
+#| label: prepare-data
+brfss_dx <- brfss_full |>
+  mutate(
+    # Outcome
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(menthlth_days), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat)
+  )
+
+set.seed(1220)
+brfss_dx <- brfss_dx |>
+  dplyr::select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat) |>
+  slice_sample(n = 5000)
+
+tibble(Metric = c("Observations", "Variables"),
+       Value  = c(nrow(brfss_dx), ncol(brfss_dx))) |>
+  kable(caption = "Analytic Dataset Dimensions") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Quick Descriptive Overview
+
+```{r}
+#| label: descriptives
+brfss_dx |>
+  tbl_summary(
+    type = list(
+      c(menthlth_days, physhlth_days, sleep_hrs, age, bmi, income_cat) ~ "continuous"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd}), [{min}, {max}]"
+    )
+  ) |>
+  bold_labels()
+```
+
+**Interpretation:** The outcome variable, mentally unhealthy days, has a mean of `r round(mean(brfss_dx$menthlth_days), 1)` (SD = `r round(sd(brfss_dx$menthlth_days), 1)`) with a range from 0 to 30, indicating a heavily right-skewed distribution where most respondents report few or no mentally unhealthy days. This skewness will be important when we assess the normality assumption later. Physical health days shows a similar pattern (mean = `r round(mean(brfss_dx$physhlth_days), 1)`). Sleep averages `r round(mean(brfss_dx$sleep_hrs), 1)` hours, age averages `r round(mean(brfss_dx$age), 1)` years, and BMI averages `r round(mean(brfss_dx$bmi), 1)` (overweight range). The sample is `r round(100 * mean(brfss_dx$sex == "Female"))`% female, and `r round(100 * mean(brfss_dx$exercise == "Yes"))`% reported exercising in the past 30 days.
+
+## Part 1: Guided Practice
+
+### 1. Regression Assumptions (LINE)
+
+Before trusting any regression output, we need to verify that the underlying assumptions are met. The acronym **LINE** helps us remember the four key assumptions:
+
+| Assumption | Description | Diagnostic tool |
+|------------|-------------|-----------------|
+| **L**inearity | The relationship between predictors and outcome is linear | Residuals vs. fitted plot |
+| **I**ndependence | Residual errors are independent of one another | Study design, Durbin-Watson test |
+| **N**ormality | Residual errors follow a normal distribution | Q-Q plot, histogram, Shapiro-Wilk test |
+| **E**qual variance | Variance of residuals is constant across fitted values (homoscedasticity) | Residuals vs. fitted plot, Scale-Location plot, Breusch-Pagan test |
+
+Violations of these assumptions do not necessarily invalidate the analysis, but they may affect the reliability of confidence intervals, p-values, and prediction intervals. The central limit theorem provides some protection when sample sizes are large, particularly for the normality assumption.
+
+#### 1.1 Fitting the Working Model
+
+Let us fit a multiple regression model predicting mentally unhealthy days from physical health days, sleep, age, sex, and BMI.
+
+```{r}
+#| label: fit-model
+mod1 <- lm(menthlth_days ~ physhlth_days + sleep_hrs + age + sex + bmi,
+           data = brfss_dx)
+
+tidy(mod1, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001)) |>
+  kable(digits = 3, caption = "Working Model Coefficients") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+glance(mod1) |>
+  dplyr::select(r.squared, adj.r.squared, AIC, BIC, sigma) |>
+  kable(digits = 3, caption = "Model Fit Summary") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: mod1-summary
+#| include: false
+b1 <- coef(mod1)
+p1 <- coef(summary(mod1))[, "Pr(>|t|)"]
+```
+
+**Interpretation:** The working model explains only about `r round(100 * summary(mod1)$r.squared)`% of the variance in mentally unhealthy days (R² = `r round(summary(mod1)$r.squared, 3)`, Adjusted R² = `r round(summary(mod1)$adj.r.squared, 3)`), which is modest but not unusual for behavioral health outcomes measured at the individual level. `r if (all(p1[-1] < 0.05)) "All predictors are statistically significant." else "Not all predictors are statistically significant."` **Physical health days** has the strongest association: each additional physically unhealthy day is associated with `r round(b1["physhlth_days"], 2)` more mentally unhealthy days. **Sleep** is protective, with each additional hour associated with `r round(abs(b1["sleep_hrs"]), 2)` `r more_fewer(b1["sleep_hrs"])` mentally unhealthy days. **Age** is `r if (b1["age"] < 0) "negatively" else "positively"` associated (`r round(b1["age"], 2)` per year), **females** report `r round(abs(b1["sexFemale"]), 1)` `r more_fewer(b1["sexFemale"])` mentally unhealthy days than males, and **BMI** has a small `r if (b1["bmi"] > 0) "positive" else "negative"` association (`r round(b1["bmi"], 2)` per unit, `r fmt_p(p1["bmi"])`). Despite the low R², this model provides a useful working example for diagnostics because the moderate fit and diverse predictor types create opportunities to observe assumption violations.
+
+### 2. Residuals: Types and Interpretation
+
+Residuals are the difference between observed and fitted values. They are our primary tool for checking assumptions. However, not all residuals are created equal.
+
+#### 2.1 Raw Residuals
+
+The simplest residual is the **raw (ordinary) residual**:
+
+$$e_i = Y_i - \hat{Y}_i$$
+
+Raw residuals are on the scale of the outcome variable. Their main limitation is that their variance is not constant across observations, because the variance of $e_i$ depends on the leverage $h_i$:
+
+$$\text{Var}(e_i) = \sigma^2(1 - h_i)$$
+
+Observations with higher leverage have smaller residual variance, making it harder to detect unusual observations using raw residuals alone.
+
+```{r}
+#| label: raw-residuals
+# Extract raw residuals
+brfss_dx <- brfss_dx |>
+  mutate(
+    raw_resid = residuals(mod1),
+    fitted_val = fitted(mod1)
+  )
+
+# Summary of raw residuals
+summary(brfss_dx$raw_resid)
+```
+
+**Interpretation:** The raw residuals range from approximately `r round(min(brfss_dx$raw_resid), 2)` to `r round(max(brfss_dx$raw_resid), 2)`, reflecting the bounded nature of the outcome (0 to 30 days). The distribution is right-skewed: the median residual is negative (`r round(median(brfss_dx$raw_resid), 2)`; most people report few mentally unhealthy days, so the model overpredicts for them), while the maximum residual is much larger in absolute value than the minimum. This asymmetry foreshadows the normality violations we will see in the diagnostic plots.
+
+#### 2.2 Standardized Residuals
+
+**Standardized residuals** divide each raw residual by the estimated standard deviation of the residuals ($\hat{\sigma}$), also known as the root mean squared error (RMSE):
+
+$$r_i^{std} = \frac{e_i}{\hat{\sigma}}$$
+
+where $\hat{\sigma} = \sqrt{MSE}$. While this puts residuals on a common scale, it does not account for the fact that different observations have different residual variances (depending on their leverage).
+
+```{r}
+#| label: standardized-residuals
+brfss_dx <- brfss_dx |>
+  mutate(std_resid = raw_resid / sigma(mod1))   # e_i / sigma-hat, as defined above
+
+# Observations with |standardized residual| > 3
+brfss_dx |>
+  filter(abs(std_resid) > 3) |>
+  dplyr::select(menthlth_days, physhlth_days, sleep_hrs, age, std_resid) |>
+  head(10) |>
+  kable(digits = 3, caption = "Observations with Large Standardized Residuals") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** Using the conventional threshold of |standardized residual| > 3, we identify `r sum(abs(brfss_dx$std_resid) > 3)` observations with unusually large prediction errors (the table shows the first 10). These individuals typically have high values of mentally unhealthy days (often 30 days) despite having predictor profiles that the model expects to have low values (e.g., older age, adequate sleep, and few physically unhealthy days). However, because standardized residuals do not account for each observation's leverage, they may miss some outliers and over-flag others. We will use jackknife residuals for more reliable outlier detection.
+
+#### 2.3 Studentized (Internally Studentized) Residuals
+
+**Studentized residuals** account for the varying variance of each residual by dividing by the observation-specific standard error:
+
+$$r_i = \frac{e_i}{\hat{\sigma}\sqrt{1 - h_i}}$$
+
+This correction means that studentized residuals have approximately unit variance under the model assumptions. In R, `rstandard()` computes these internally studentized residuals.
+
+#### 2.4 Jackknife (Externally Studentized) Residuals
+
+**Jackknife residuals** (also called externally studentized or deleted residuals) take the correction one step further. For observation $i$, the residual is computed using a model fitted *without* observation $i$:
+
+$$r_{(-i)} = \frac{e_i}{\hat{\sigma}_{(-i)}\sqrt{1 - h_i}}$$
+
+where $\hat{\sigma}_{(-i)}$ is the RMSE estimated from the model that excludes observation $i$. Under the null hypothesis that observation $i$ is not an outlier, $r_{(-i)} \sim t_{n-p-2}$.
+
+The jackknife residual is the **most powerful** residual for detecting outliers because it prevents the potentially outlying observation from influencing the estimate of $\hat{\sigma}$.
+
+```{r}
+#| label: jackknife-residuals
+#| fig-alt: !expr sprintf("Three histograms of the residuals from the working model, labeled raw, standardized, and jackknife. All three have the same shape, a tall peak just below zero and a long right tail; raw residuals run from %.0f to %.0f days, and the standardized and jackknife residuals run from about %.1f to %.1f.", min(brfss_dx$raw_resid), max(brfss_dx$raw_resid), min(brfss_dx$jack_resid), max(brfss_dx$jack_resid))
+brfss_dx <- brfss_dx |>
+  mutate(jack_resid = rstudent(mod1))
+
+# Compare residual types
+brfss_dx |>
+  dplyr::select(raw_resid, std_resid, jack_resid) |>
+  pivot_longer(everything(), names_to = "type", values_to = "value") |>
+  mutate(type = factor(type, levels = c("raw_resid", "std_resid", "jack_resid"))) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "white", alpha = 0.8) +
+  facet_wrap(~type, scales = "free_x",
+             labeller = labeller(type = c(
+               raw_resid = "Raw Residuals",
+               std_resid = "Standardized Residuals",
+               jack_resid = "Jackknife Residuals"
+             ))) +
+  labs(title = "Distribution of Three Residual Types",
+       x = "Residual Value", y = "Frequency") +
+  theme_minimal()
+```
+
+**Interpretation:** The three histogram panels show that all three residual types have similar shapes: a pronounced right skew with a long positive tail. The standardized and jackknife residual distributions are nearly identical (as expected with n = 5,000, where leverage differences are small). The right skew in the residuals mirrors the right skew in the outcome variable and indicates a violation of the normality assumption. Note that the largest jackknife residual is `r round(max(brfss_dx$jack_resid), 1)`, while the smallest is `r round(min(brfss_dx$jack_resid), 1)`, confirming the asymmetry.
+
+#### 2.5 Summary of Residual Types
+
+| Residual | Formula | Distribution under $H_0$ | Use |
+|----------|---------|--------------------------|-----|
+| Raw ($e_i$) | $Y_i - \hat{Y}_i$ | Unequal variance | Quick check |
+| Standardized | $e_i / \hat{\sigma}$ | Approximately standard normal | Rough screening |
+| Studentized | $e_i / (\hat{\sigma}\sqrt{1-h_i})$ | Approximately standard normal | Better screening |
+| Jackknife ($r_{(-i)}$) | $e_i / (\hat{\sigma}_{(-i)}\sqrt{1-h_i})$ | $t_{n-p-2}$ | Formal outlier testing |
+
+### 3. Diagnostic Plots
+
+#### 3.1 Residuals vs. Fitted Values
+
+This is the single most important diagnostic plot. It checks **linearity** and **homoscedasticity** simultaneously.
+
+- **Linearity:** If the model is correct, the residuals should scatter randomly around zero with no systematic pattern (no curve, no trend).
+- **Equal variance:** The vertical spread of the residuals should remain roughly constant as fitted values increase. A "funnel" shape (spread increasing or decreasing) indicates heteroscedasticity.
+
+```{r}
+#| label: resid-vs-fitted
+#| fig-alt: "Scatter plot of jackknife residuals against fitted values with a red dashed line at zero and an orange loess curve. The points fall on parallel downward-sloping diagonal bands, one for each whole number of reported days; the lowest and densest band is people reporting 0 days. The loess curve stays near zero with a mild wave."
+ggplot(brfss_dx, aes(x = fitted_val, y = jack_resid)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_smooth(method = "loess", se = FALSE, color = "darkorange", linewidth = 1) +
+  labs(title = "Jackknife Residuals vs. Fitted Values",
+       x = "Fitted Values", y = "Jackknife Residuals") +
+  theme_minimal()
+```
+
+**What we observe in our data:** The residuals fall on **parallel diagonal bands**, one for each whole number of days, because the outcome is a count bounded at 0 and 30: for everyone who reports, say, 0 days, the residual is 0 minus the fitted value, so those points lie on a line of slope −1. The loess line stays close to zero with only a mild wave, so there is no strong sign of **non-linearity**. The spread is not constant, though: at low fitted values most residuals are small and negative with a long positive tail (people predicted to have few bad days who report many), while at high fitted values they spread in both directions. This unequal spread, a form of **heteroscedasticity**, is characteristic of count-like or bounded outcomes where the variance increases with the mean, and the Scale-Location plot below shows it more clearly. Both issues suggest we may need to consider a transformation of the outcome variable or a model for counts.
+
+**Interpretation guide:**
+
+- A flat loess line near zero suggests linearity holds.
+- A curved loess line suggests non-linearity (consider polynomial terms or transformations).
+- A funnel shape suggests heteroscedasticity (consider a variance-stabilizing transformation such as log or square root).
+
+#### 3.2 Normal Q-Q Plot
+
+The Q-Q plot compares the distribution of the residuals to the theoretical normal distribution. If the normality assumption holds, points should fall approximately along the diagonal reference line.
+
+```{r}
+#| label: qq-plot
+#| fig-alt: "Normal Q-Q plot of the jackknife residuals with a red reference line. The points follow the line in the middle, curve sharply upward above a theoretical quantile of about 1 to reach about 4.3, and fall below the line in the lower tail, an S shape that shows strong right skew."
+ggplot(brfss_dx, aes(sample = jack_resid)) +
+  stat_qq(alpha = 0.3, color = "steelblue") +
+  stat_qq_line(color = "red", linewidth = 1) +
+  labs(title = "Normal Q-Q Plot of Jackknife Residuals",
+       x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+```
+
+**What we observe in our data:** The Q-Q plot shows a severe departure from normality. The points follow the reference line reasonably well in the center but deviate dramatically in the **upper tail**, curving sharply upward. This indicates strong **right skew** in the residuals: the model produces more large positive residuals than a normal distribution would predict. This pattern is consistent with the skewed outcome distribution (most people report 0 mentally unhealthy days, creating a floor effect). The lower tail also deviates slightly, with a step-like pattern reflecting the discrete, bounded nature of the outcome.
+
+**Common Q-Q patterns and what they suggest:**
+
+| Pattern | Interpretation | Potential remedy |
+|---------|---------------|------------------|
+| Points follow the line | Normality satisfied | None needed |
+| Right skew (upper tail curves upward) | Right-skewed residuals | Log or square root transformation of $Y$ |
+| Left skew (lower tail curves downward) | Left-skewed residuals | Square transformation of $Y$ |
+| Heavy tails (both ends deviate) | Heavy-tailed distribution | Robust regression or transformation |
+| S-shape | Both skew and kurtosis issues | Consider a different model family |
+
+#### 3.3 Histogram of Residuals
+
+A histogram provides a complementary view to the Q-Q plot.
+
+```{r}
+#| label: resid-histogram
+#| fig-alt: !expr sprintf("Histogram of jackknife residuals with a standard normal curve in red. The bars form a much taller and narrower peak just below zero than the normal curve, and a long thin right tail reaches about %.1f.", max(brfss_dx$jack_resid))
+ggplot(brfss_dx, aes(x = jack_resid)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 50,
+                 fill = "steelblue", color = "white", alpha = 0.8) +
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 1),
+                color = "red", linewidth = 1) +
+  labs(title = "Histogram of Jackknife Residuals with Normal Curve",
+       x = "Jackknife Residual", y = "Density") +
+  theme_minimal()
+```
+
+**Interpretation:** The histogram confirms the Q-Q plot findings. The residual distribution has a sharp peak just below zero (reflecting the many respondents with few mentally unhealthy days) and a long right tail extending to about +`r floor(max(brfss_dx$jack_resid))`. The overlaid normal curve (red line) shows how much the actual distribution departs from normality: the observed distribution is much more peaked (leptokurtic) and right-skewed than a normal distribution. In a large sample like ours (n = 5,000), the central limit theorem provides some protection for inference on the coefficients, but prediction intervals would be unreliable under this degree of non-normality.
+
+#### 3.4 Scale-Location Plot
+
+The **Scale-Location** plot shows $\sqrt{|\text{standardized residuals}|}$ vs. fitted values. It is specifically designed to assess homoscedasticity. A flat trend line indicates constant variance.
+
+```{r}
+#| label: scale-location
+#| fig-alt: "Scale-location plot of the square root of the absolute standardized residuals against fitted values, with an orange loess curve. The points form curved bands, and the loess curve rises from about 0.4 near a fitted value of 0 to about 1.2 near 14, showing that the spread grows with the fitted value."
+brfss_dx <- brfss_dx |>
+  mutate(sqrt_abs_std = sqrt(abs(std_resid)))
+
+ggplot(brfss_dx, aes(x = fitted_val, y = sqrt_abs_std)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "loess", se = FALSE, color = "darkorange", linewidth = 1) +
+  labs(title = "Scale-Location Plot",
+       x = "Fitted Values",
+       y = expression(sqrt("|Standardized Residuals|"))) +
+  theme_minimal()
+```
+
+**Interpretation:** The Scale-Location plot provides the clearest evidence of heteroscedasticity. The loess line rises from about 0.4 near a fitted value of 0 to about 1.2 at fitted values near 14, meaning the spread of residuals (measured as $\sqrt{|\text{standardized residuals}|}$) increases systematically with fitted values. This confirms the unequal spread seen in the residuals vs. fitted plot. In practical terms, the model's predictions are more precise for individuals with low predicted mentally unhealthy days and less precise for those with higher predictions. This pattern is common with health outcomes that have a floor at zero.
+
+#### 3.5 Base R Diagnostic Plots
+
+R provides four built-in diagnostic plots through `plot()` on an `lm` object. These are quick but less customizable.
+
+```{r}
+#| label: base-diagnostics
+#| fig-alt: !expr sprintf("R's four default diagnostic panels for the working model. Residuals versus fitted shows diagonal bands with a red smoother that lies below zero for most of the range. The Q-Q plot is S-shaped with a heavy upper tail. Scale-location rises from left to right. Residuals versus leverage shows leverages up to about %.3f and no Cook's distance contour within the plotted area.", max(hatvalues(mod1)))
+#| fig-height: 8
+par(mfrow = c(2, 2))
+plot(mod1)
+par(mfrow = c(1, 1))
+```
+
+The four panels are:
+
+1. **Residuals vs. Fitted** (linearity + homoscedasticity)
+2. **Normal Q-Q** (normality)
+3. **Scale-Location** (homoscedasticity)
+4. **Residuals vs. Leverage** (influential observations via Cook's distance contours)
+
+Note on labels: R's `plot()` labels the y-axis of panels 2 to 4 "Standardized residuals", but it plots `rstandard()`, which this lecture calls studentized residuals (Section 2.3).
+
+**Interpretation of our diagnostic panels:** The four base R diagnostic plots summarize what we have observed individually. Panel 1 (Residuals vs. Fitted) shows the same diagonal bands; its red smoother uses raw residuals and a different smoothing method, and it lies below zero for fitted values above about 1, reaching about −4 near a fitted value of 7, a sign that the straight line overpredicts for most people. Panel 2 (Normal Q-Q) shows the severe right-tail departure. Panel 3 (Scale-Location) confirms increasing variance. Panel 4 (Residuals vs. Leverage) shows that while some observations have notable leverage, the largest Cook's distance is only `r signif(max(cooks.distance(mod1)), 2)`, so no observation comes near the 0.5 or 1.0 contours (they fall outside the plotted area): no single observation dominates the model fit. R labels the most extreme observations by row number in each panel for further investigation.
+
+#### 3.6 Formal Tests for Assumptions
+
+While visual diagnostics are essential, formal tests can supplement them, especially for borderline cases.
+
+```{r}
+#| label: formal-tests
+# Breusch-Pagan test for heteroscedasticity
+bp_test <- car::ncvTest(mod1)
+tibble(
+  Test = "Breusch-Pagan",
+  Statistic = bp_test$ChiSquare,
+  df = bp_test$Df,
+  p_value = format.pval(bp_test$p, digits = 3, eps = 0.001)
+) |>
+  kable(digits = 4, caption = "Breusch-Pagan Test for Heteroscedasticity") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The Breusch-Pagan test gives χ² = `r round(bp_test$ChiSquare, 1)` on `r bp_test$Df` df (`r fmt_p(bp_test$p)`), providing `r if (bp_test$p < 0.05) "strong statistical evidence of heteroscedasticity" else "no statistical evidence of heteroscedasticity"`. However, this must be interpreted cautiously in the context of the note below.
+
+::: {.callout-note}
+## Note
+
+With very large samples (n = 5000), formal tests are often overpowered and detect trivial departures from assumptions. In large samples, the **visual** diagnostic is typically more informative than the p-value. If the Q-Q plot looks reasonable and the residual plot has no alarming pattern, you may proceed even if a formal test rejects.
+:::
+
+### 4. Remedial Measures: Transformations
+
+When assumptions are violated, **transforming the outcome variable** is a common remedy.
+
+| Problem | Transformation | R code |
+|---------|---------------|--------|
+| Right-skewed residuals | $\log(Y)$ | `lm(log(y) ~ x)` |
+| Right-skewed residuals (mild) | $\sqrt{Y}$ | `lm(sqrt(y) ~ x)` |
+| Left-skewed residuals | $Y^2$ | `lm(I(y^2) ~ x)` |
+| Non-constant variance | $\log(Y)$ or $\sqrt{Y}$ | Depends on pattern |
+
+#### 4.1 Trying a Transformation
+
+If the Q-Q plot suggests right skew, we can try a log transformation. Since our outcome (`menthlth_days`) includes zeros, we use $\log(Y + 1)$.
+
+```{r}
+#| label: log-transformation
+#| fig-alt: "Two normal Q-Q plots of jackknife residuals. Left, original scale, the points bend sharply away from the red line in an S shape with a long upper tail. Right, log of Y plus 1, the points stay much closer to the line, though a milder S shape remains."
+mod_log <- lm(log(menthlth_days + 1) ~ physhlth_days + sleep_hrs + age + sex + bmi,
+              data = brfss_dx)
+
+# Compare Q-Q plots side by side
+par(mfrow = c(1, 2))
+
+qqnorm(rstudent(mod1), main = "Q-Q: Original Scale")
+qqline(rstudent(mod1), col = "red")
+
+qqnorm(rstudent(mod_log), main = "Q-Q: Log(Y+1) Scale")
+qqline(rstudent(mod_log), col = "red")
+
+par(mfrow = c(1, 1))
+```
+
+**Interpretation:** The log(Y+1) transformation substantially improves the Q-Q plot. The original scale (left panel) shows the severe right-tail departure we identified earlier. The transformed scale (right panel) shows points that track the reference line much more closely, though an S-shaped departure remains. The transformation compresses the long right tail of the outcome distribution, making the residuals more symmetric. However, the improvement is not perfect because the outcome includes many exact zeros (respondents with 0 mentally unhealthy days), which the log transformation cannot fully normalize.
+
+::: {.callout-important}
+## Important
+
+Transforming the outcome changes the interpretation of the coefficients. With $\log(Y+1)$, a one-unit increase in $X$ is associated with a **multiplicative** change in $Y+1$, not an additive change.
+:::
+
+### 5. Outliers and Influential Observations
+
+An **outlier** is an observation with a residual that is much larger than the rest. An **influential** observation is one whose removal substantially changes the fitted model (coefficients, predictions, or both).
+
+Not all outliers are influential, and not all influential points are outliers. Influence depends on two components:
+
+- **Residual size** (the distance of $Y_i$ from the regression surface)
+- **Leverage** (the distance of $X_i$ from the center of the predictor space)
+
+#### 5.1 Detecting Outliers via Jackknife Residuals
+
+We test whether any jackknife residual is statistically significant using a **Bonferroni correction** to account for multiple testing.
+
+For $n$ observations and $p$ predictors:
+
+- $H_0$: observation $i$ is not an outlier
+- Under $H_0$: $r_{(-i)} \sim t_{n-p-2}$
+- Bonferroni-corrected significance level: $\alpha / n$
+- Observation $i$ is an outlier if $|r_{(-i)}| > t_{n-p-2,\; 1-\alpha/(2n)}$
+
+```{r}
+#| label: outlier-test
+n <- nrow(brfss_dx)
+p <- length(coef(mod1)) - 1  # number of predictors (excluding intercept)
+alpha <- 0.05
+
+# Critical value with Bonferroni correction
+crit_val <- qt(1 - alpha / (2 * n), df = n - p - 2)
+
+cat("Sample size:", n, "\n")
+cat("Number of predictors:", p, "\n")
+cat("Bonferroni critical value:", round(crit_val, 3), "\n\n")
+
+# Identify outliers
+outlier_idx <- which(abs(brfss_dx$jack_resid) > crit_val)
+cat("Number of jackknife residual outliers:", length(outlier_idx), "\n")
+
+if (length(outlier_idx) > 0) {
+  brfss_dx |>
+    slice(outlier_idx) |>
+    dplyr::select(menthlth_days, physhlth_days, sleep_hrs, age, jack_resid) |>
+    kable(digits = 3, caption = "Outliers by Jackknife Residual (Bonferroni-corrected)") |>
+    kable_styling(bootstrap_options = "striped", full_width = FALSE)
+}
+```
+
+**Interpretation:** Using the Bonferroni-corrected critical value of `r round(crit_val, 2)`, `r if (length(outlier_idx) == 0) "**no observations** qualify" else paste0("**", length(outlier_idx), " observations** qualify")` as statistically significant outliers (the largest |jackknife residual| is `r round(max(abs(brfss_dx$jack_resid)), 2)`). This may seem surprising given the clearly non-normal residual distribution, but the Bonferroni correction is conservative with n = `r format(n, big.mark = ",")` (the per-observation α is 0.05/`r n` = `r format(alpha / n, scientific = FALSE)`). The absence of formal outliers does not mean all observations fit well; it simply means no single observation is extreme enough to be statistically distinguished from the rest after correcting for `r format(n, big.mark = ",")` simultaneous tests.
+
+The `car::outlierTest()` function automates this Bonferroni-corrected test:
+
+```{r}
+#| label: car-outlier-test
+car::outlierTest(mod1)
+```
+
+#### 5.2 Leverage
+
+**Leverage** ($h_i$) measures how far an observation's predictor values are from the mean of all predictors. High-leverage observations have unusual predictor values and exert disproportionate influence on the fitted line.
+
+The leverage for observation $i$ is:
+
+$$h_i = \frac{1}{n} + \frac{(\mathbf{x}_i - \bar{\mathbf{x}})^\top \mathbf{S}^{-1} (\mathbf{x}_i - \bar{\mathbf{x}})}{n - 1}$$
+
+where $\mathbf{x}_i$ is observation $i$'s vector of predictor values, $\bar{\mathbf{x}}$ the vector of predictor means, and $\mathbf{S}$ the sample covariance matrix of the predictors. (Equivalently, $h_i$ is the $i$-th diagonal element of the hat matrix $\mathbf{H} = \mathbf{X}(\mathbf{X}^\top\mathbf{X})^{-1}\mathbf{X}^\top$.) With a single predictor this reduces to $h_i = \frac{1}{n} + \frac{(X_i - \bar{X})^2}{\sum_k (X_k - \bar{X})^2}$; when the predictors are uncorrelated it becomes $\frac{1}{n} + \sum_j \frac{(X_{ij} - \bar{X}_j)^2}{(n-1)s_j^2}$.
+
+Key properties of leverage:
+
+- $0 \leq h_i \leq 1$
+- $\sum_{i=1}^{n} h_i = p + 1$
+- Average leverage: $\bar{h} = (p+1)/n$
+
+**Rules of thumb for high leverage:**
+
+| Rule | Threshold | Reference |
+|------|-----------|-----------|
+| $h_i > 2\bar{h}$ | $2(p+1)/n$ | Hoaglin and Welsch (1978) |
+| $h_i > 3\bar{h}$ | $3(p+1)/n$ | Velleman and Welsch (1981) |
+| $h_i > 0.5$ | 0.5 | Huber (1981): clearly large |
+| $h_i > 0.2$ | 0.2 | Huber (1981): worth examining |
+
+```{r}
+#| label: leverage
+brfss_dx <- brfss_dx |>
+  mutate(leverage = hatvalues(mod1))
+
+h_bar <- (p + 1) / n
+
+cat("Average leverage:", round(h_bar, 5), "\n")
+cat("2x average leverage threshold:", round(2 * h_bar, 5), "\n")
+cat("3x average leverage threshold:", round(3 * h_bar, 5), "\n\n")
+
+# High leverage points (using 3x threshold)
+high_lev <- brfss_dx |>
+  filter(leverage > 3 * h_bar)
+
+cat("Number of high-leverage points (> 3x average):", nrow(high_lev), "\n")
+```
+
+```{r}
+#| label: leverage-plot
+#| fig-alt: !expr sprintf("Scatter plot of leverage for each of the %s observations by row number, with dashed lines at 2 and 3 times the average leverage (%.4f and %.4f). Most points sit below 0.002; %d points lie above the 3 times line, the highest near %.3f.", format(n, big.mark = ","), 2 * h_bar, 3 * h_bar, nrow(high_lev), max(brfss_dx$leverage))
+ggplot(brfss_dx, aes(x = seq_len(n), y = leverage)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_hline(yintercept = 2 * h_bar, color = "orange", linetype = "dashed",
+             linewidth = 0.8) +
+  geom_hline(yintercept = 3 * h_bar, color = "red", linetype = "dashed",
+             linewidth = 0.8) +
+  annotate("text", x = n * 0.9, y = 2 * h_bar + 0.0005, label = "2x average",
+           color = "#9A4A00") +
+  annotate("text", x = n * 0.9, y = 3 * h_bar + 0.0005, label = "3x average",
+           color = "#B00020") +
+  labs(title = "Leverage Values by Observation Index",
+       x = "Observation Index", y = "Leverage (h_i)") +
+  theme_minimal()
+```
+
+**Interpretation:** The leverage plot shows that the vast majority of observations have low leverage (clustered near the average of `r round(h_bar, 4)`), but `r nrow(high_lev)` observations exceed the 3x threshold. These high-leverage points have unusual predictor values: their median is `r median(high_lev$physhlth_days)` physically unhealthy days (versus `r median(brfss_dx$physhlth_days)` overall), with median BMI `r round(median(high_lev$bmi), 1)` and median age `r median(high_lev$age)`, so most are unusual mainly because of extreme physical health and BMI values. However, high leverage alone does not mean an observation is problematic; it only means the observation has outsized potential to influence the regression if its outcome value is also unusual. We need Cook's distance to assess actual influence.
+
+#### 5.3 Cook's Distance
+
+**Cook's distance** combines residual size and leverage into a single measure of overall influence. It quantifies how much all fitted values change when observation $i$ is removed:
+
+$$D_i = \frac{r_i^2}{p+1} \cdot \frac{h_i}{1 - h_i}$$
+
+where $r_i$ is the internally studentized residual. A large Cook's distance indicates that the observation substantially influences the regression surface.
+
+**Rules of thumb for Cook's distance:**
+
+| Threshold | Interpretation |
+|-----------|---------------|
+| $D_i > 4/n$ | Common rule for flagging potentially influential points |
+| $D_i > 1$ | Clearly influential (some textbooks) |
+| $D_i > F_{0.50, p+1, n-p-1}$ | Compares to the median of the $F$-distribution |
+
+```{r}
+#| label: cooks-distance
+brfss_dx <- brfss_dx |>
+  mutate(cooks_d = cooks.distance(mod1))
+
+# Threshold
+cooks_threshold <- 4 / n
+
+cat("Cook's distance threshold (4/n):", round(cooks_threshold, 5), "\n")
+
+influential_obs <- brfss_dx |>
+  filter(cooks_d > cooks_threshold)
+
+cat("Number of influential points (D > 4/n):", nrow(influential_obs), "\n")
+```
+
+```{r}
+#| label: cooks-plot
+#| fig-alt: !expr sprintf("Scatter plot of Cook's distance for each observation by row number, with a red dashed line at 4/n = %s. Most points lie near zero; %d points lie above the line, and the largest Cook's distance is %.3f.", format(round(cooks_threshold, 4), scientific = FALSE), nrow(influential_obs), max(brfss_dx$cooks_d))
+ggplot(brfss_dx, aes(x = seq_len(n), y = cooks_d)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_hline(yintercept = cooks_threshold, color = "red",
+             linetype = "dashed", linewidth = 0.8) +
+  labs(title = "Cook's Distance by Observation Index",
+       subtitle = paste0("Red line: 4/n = ", round(cooks_threshold, 5)),
+       x = "Observation Index", y = "Cook's Distance") +
+  theme_minimal()
+```
+
+**Interpretation:** Using the 4/n = `r format(round(cooks_threshold, 4), scientific = FALSE)` threshold, `r nrow(influential_obs)` observations (about `r round(100 * nrow(influential_obs) / n)`% of the sample) are flagged as potentially influential. This is a large number, but the threshold is quite strict with n = `r format(n, big.mark = ",")`. Importantly, no observation has a Cook's distance approaching 0.5 or 1.0 (the traditional thresholds for "clearly influential"); the largest is `r signif(max(brfss_dx$cooks_d), 2)`. This suggests that no single observation dominates the regression surface. The pattern of many small Cook's distances is typical for large datasets.
+
+#### 5.4 DFFITS and DFBETAS
+
+Two additional influence measures complement Cook's distance:
+
+**DFFITS** measures the influence of observation $i$ on its own fitted value:
+
+$$\text{DFFITS}_i = r_{(-i)} \sqrt{\frac{h_i}{1-h_i}}$$
+
+Flagging threshold: $|\text{DFFITS}_i| > 2\sqrt{(p+1)/n}$
+
+**DFBETAS** measures the influence of observation $i$ on each individual regression coefficient $\hat{\beta}_j$:
+
+$$\text{DFBETAS}_{j,i} = \frac{\hat{\beta}_j - \hat{\beta}_{j(-i)}}{\hat{\sigma}_{(-i)} \sqrt{(X^TX)^{-1}_{jj}}}$$
+
+Flagging threshold: $|\text{DFBETAS}_{j,i}| > 2/\sqrt{n}$
+
+```{r}
+#| label: dffits-dfbetas
+brfss_dx <- brfss_dx |>
+  mutate(dffits_val = dffits(mod1))
+
+dffits_threshold <- 2 * sqrt((p + 1) / n)
+dfbetas_threshold <- 2 / sqrt(n)
+
+cat("DFFITS threshold:", round(dffits_threshold, 4), "\n")
+cat("DFBETAS threshold:", round(dfbetas_threshold, 4), "\n\n")
+
+# Number exceeding DFFITS threshold
+cat("Observations with |DFFITS| > threshold:",
+    sum(abs(brfss_dx$dffits_val) > dffits_threshold), "\n")
+
+# DFBETAS for each coefficient
+dfb <- dfbetas(mod1)
+cat("\nObservations exceeding DFBETAS threshold per coefficient:\n")
+dfb_flags <- tibble(
+  Coefficient = colnames(dfb),
+  n_flagged = map_int(seq_len(ncol(dfb)), \(j) sum(abs(dfb[, j]) > dfbetas_threshold))
+)
+
+dfb_flags |>
+  kable(caption = "DFBETAS Flags by Coefficient") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The DFFITS and DFBETAS results complement the Cook's distance findings. The DFFITS threshold is relatively small (reflecting the large sample size), so a substantial number of observations are flagged. The DFBETAS table shows how many observations meaningfully shift each individual coefficient. `r top2 <- dfb_flags |> arrange(desc(n_flagged)) |> head(2); paste0(top2$Coefficient[1], " (", top2$n_flagged[1], " observations) and ", top2$Coefficient[2], " (", top2$n_flagged[2], ") have the most flagged observations.")` Physical health days having the most is consistent with the heteroscedasticity we observed: observations with extreme physical health values exert more leverage on that coefficient. Again, no individual observation is drastically altering the model, but the collective pattern reinforces the importance of checking whether results are robust to the removal of influential subsets.
+
+#### 5.5 Residuals vs. Leverage Plot
+
+This plot combines residuals and leverage, with Cook's distance contours overlaid. Points in the upper-right or lower-right corners are both outlying and high-leverage, making them potentially influential.
+
+```{r}
+#| label: resid-leverage
+#| fig-alt: !expr sprintf("Scatter plot of jackknife residuals against leverage, with point size proportional to Cook's distance and a red dashed line at 3 times the average leverage. Most points cluster at low leverage with residuals between about -2 and 4. A group of points to the right of the line with residuals near 2 to 3.5 are the largest circles, but the largest Cook's distance is only %.3f.", max(brfss_dx$cooks_d))
+ggplot(brfss_dx, aes(x = leverage, y = jack_resid)) +
+  geom_point(aes(size = cooks_d), alpha = 0.3, color = "steelblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_vline(xintercept = 3 * h_bar, color = "red", linetype = "dashed") +
+  scale_size_continuous(name = "Cook's D", range = c(0.5, 4)) +
+  labs(title = "Jackknife Residuals vs. Leverage",
+       subtitle = "Point size proportional to Cook's distance",
+       x = "Leverage", y = "Jackknife Residual") +
+  theme_minimal()
+```
+
+**Interpretation:** This combined plot is the most informative single diagnostic for influence. Most observations cluster at the left (low leverage), with residuals between about −2 and +4. The critical region is the upper-right (both high leverage and large residuals), where observations would have the greatest potential to distort the model. Some observations do sit there: `r sum(brfss_dx$leverage > 3 * h_bar & abs(brfss_dx$jack_resid) > 2)` people have leverage above 3x the average and a jackknife residual beyond ±2, and they are the largest circles in the plot. Even so, the largest Cook's distance is only `r signif(max(brfss_dx$cooks_d), 2)`, far below 0.5, so no single observation unduly influences the regression.
+
+#### 5.6 What To Do with Outliers and Influential Points
+
+When you identify outliers or influential observations:
+
+1. **Investigate the observations.** Are they data entry errors? Impossible values? Special subpopulations?
+2. **Fit the model with and without** the flagged observations.
+3. **Compare the results.** If the coefficients change substantially, report both sets of results.
+4. **Do NOT automatically delete observations** just because they have large residuals or leverage. Only remove observations if there is a scientific or data-quality justification.
+
+```{r}
+#| label: with-without
+# Compare model with and without high-influence points
+influential_idx <- which(brfss_dx$cooks_d > cooks_threshold)
+brfss_no_infl <- brfss_dx |> slice(-influential_idx)
+
+mod_no_infl <- lm(menthlth_days ~ physhlth_days + sleep_hrs + age + sex + bmi,
+                  data = brfss_no_infl)
+
+# Side-by-side comparison
+bind_rows(
+  tidy(mod1) |> mutate(Model = "Full data"),
+  tidy(mod_no_infl) |> mutate(Model = "Without influential obs")
+) |>
+  dplyr::select(Model, term, estimate, std.error, p.value) |>
+  pivot_wider(
+    names_from = Model,
+    values_from = c(estimate, std.error, p.value),
+    names_glue = "{Model}_{.value}"
+  ) |>
+  kable(digits = 4, caption = "Coefficient Comparison: Full Data vs. Influential Points Removed") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: with-without-change
+#| include: false
+pct_chg <- round(100 * (coef(mod_no_infl) - coef(mod1)) / abs(coef(mod1)))
+```
+
+**Interpretation:** Removing the `r nrow(influential_obs)` observations flagged by Cook's distance (about `r round(100 * nrow(influential_obs) / n)`% of the sample) changes the coefficients **substantially**, even though the signs stay the same: the sleep coefficient moves from `r round(coef(mod1)["sleep_hrs"], 2)` to `r round(coef(mod_no_infl)["sleep_hrs"], 2)` (`r pct_chg["sleep_hrs"]`%), age from `r round(coef(mod1)["age"], 3)` to `r round(coef(mod_no_infl)["age"], 3)` (`r pct_chg["age"]`%), and the intercept from `r round(coef(mod1)[1], 1)` to `r round(coef(mod_no_infl)[1], 1)`. The flagged group is mostly people who report many mentally unhealthy days, the very people the model is about, so dropping them changes the question the model answers rather than cleaning it. This is exactly why the 4/n rule should prompt investigation, not deletion: report the full-data model, and show a with-and-without comparison like this one only as a sensitivity analysis.
+
+### 6. Multicollinearity
+
+**Multicollinearity** occurs when two or more predictors in a regression model are moderately or highly correlated. This creates instability in the coefficient estimates: the standard errors inflate, individual predictors may appear non-significant even when the overall model is significant, and estimated coefficients may change dramatically when variables are added or removed.
+
+#### 6.1 Types of Multicollinearity
+
+| Type | Cause | Example |
+|------|-------|---------|
+| **Structural** | Mathematical artifact from creating new variables | Including both $X$ and $X^2$; or age and age-squared |
+| **Data-based** | Inherent correlation in the data | Income and education; systolic and diastolic blood pressure |
+
+#### 6.2 Symptoms of Multicollinearity
+
+How do you know multicollinearity is present?
+
+- Estimated $\beta$ values change wildly when predictors are added or removed
+- Individual predictor t-tests are non-significant, but the overall F-test is significant
+- Pairwise correlations among predictors are large (though this misses multicollinearity involving linear combinations of several variables)
+- Variance Inflation Factors (VIF) are large
+
+#### 6.3 Variance Inflation Factor (VIF)
+
+The **VIF** for predictor $j$ is:
+
+$$VIF_j = \frac{1}{1 - R_j^2}$$
+
+where $R_j^2$ is the $R^2$ obtained from regressing $X_j$ on all other predictors. The VIF tells you how much the variance of $\hat{\beta}_j$ is inflated by collinearity relative to what it would be if $X_j$ were uncorrelated with the other predictors.
+
+An equivalent measure is the **tolerance**:
+
+$$\text{tolerance}_j = \frac{1}{VIF_j} = 1 - R_j^2$$
+
+**Rules of thumb:**
+
+| VIF value | Interpretation |
+|-----------|---------------|
+| $VIF_j = 1$ | No correlation with other predictors |
+| $VIF_j > 4$ | Needs further investigation |
+| $VIF_j > 10$ | Strong collinearity, action likely needed |
+
+```{r}
+#| label: vif
+vif_values <- car::vif(mod1)
+
+tibble(
+  Predictor = names(vif_values),
+  VIF = round(vif_values, 3),
+  Tolerance = round(1 / vif_values, 3)
+) |>
+  mutate(Flag = case_when(
+    VIF > 10 ~ "Strong collinearity",
+    VIF > 4  ~ "Investigate",
+    TRUE     ~ "OK"
+  )) |>
+  kable(caption = "Variance Inflation Factors") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** All VIF values are very close to 1.0 (ranging from `r round(min(vif_values), 3)` to `r round(max(vif_values), 3)`), with corresponding tolerances near 1.0. This means there is essentially **no multicollinearity** among the predictors in our model. Each predictor provides largely independent information, and the standard errors are not inflated by collinearity. This is not surprising given that our predictors (physical health days, sleep hours, age, sex, BMI) measure fundamentally different constructs with limited conceptual overlap.
+
+#### 6.4 Correlation Matrix for Context
+
+While pairwise correlations do not capture all forms of multicollinearity (a variable can be correlated with a *linear combination* of other variables without being strongly correlated with any single one), they are a useful starting point.
+
+```{r}
+#| label: correlation-matrix
+brfss_dx |>
+  dplyr::select(physhlth_days, sleep_hrs, age, bmi) |>
+  cor(use = "complete.obs") |>
+  round(3) |>
+  kable(caption = "Pairwise Correlation Matrix (Continuous Predictors)") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: cor-summary
+#| include: false
+cm <- cor(dplyr::select(brfss_dx, physhlth_days, sleep_hrs, age, bmi))
+cm[upper.tri(cm, diag = TRUE)] <- NA
+top <- which(abs(cm) == max(abs(cm), na.rm = TRUE), arr.ind = TRUE)
+```
+
+**Interpretation:** The pairwise correlations are uniformly weak, with the largest being r = `r round(cm[top], 3)` between `r rownames(cm)[top[1]]` and `r colnames(cm)[top[2]]` (older adults sleep slightly more in this sample). Physical health days and BMI have a correlation of `r round(cor(brfss_dx$physhlth_days, brfss_dx$bmi), 2)`, reflecting the well-established link between obesity and physical health problems. None of these correlations approach levels that would cause collinearity concerns (typically r > 0.7 or 0.8). The correlation matrix confirms the VIF findings: multicollinearity is not an issue in this model.
+
+#### 6.5 Remedies for Multicollinearity
+
+The appropriate remedy depends on the type of multicollinearity:
+
+**For structural multicollinearity (e.g., $X$ and $X^2$):**
+
+- **Center the variable** by subtracting its mean before squaring. This often eliminates or greatly reduces the collinearity between $X$ and $X^2$.
+- Note: centering changes the intercept and the coefficient of the linear term, which becomes the slope at the mean of $X$; the coefficient of $X^2$ and the fitted values do not change.
+
+```{r}
+#| label: centering-example
+# Example: structural multicollinearity
+brfss_dx <- brfss_dx |>
+  mutate(
+    bmi_sq = bmi^2,
+    bmi_c = bmi - mean(bmi),
+    bmi_c_sq = bmi_c^2
+  )
+
+# VIF before centering
+mod_poly <- lm(menthlth_days ~ bmi + bmi_sq, data = brfss_dx)
+cat("VIF before centering:\n")
+car::vif(mod_poly)
+
+# VIF after centering
+mod_poly_c <- lm(menthlth_days ~ bmi_c + bmi_c_sq, data = brfss_dx)
+cat("\nVIF after centering:\n")
+car::vif(mod_poly_c)
+```
+
+**Interpretation:** Before centering, BMI and BMI² have high VIFs (`r round(car::vif(mod_poly)[1], 1)`, well above 10) because they are mathematically related: squaring a variable creates a strong linear relationship with the original. After centering BMI by subtracting its mean, the VIF drops to `r round(car::vif(mod_poly_c)[1], 2)`, because the centered variable and its square are much less correlated. Centering does not change the model's predictions or the overall F-test; it only redistributes the variance attribution between the linear and quadratic terms, making each coefficient individually interpretable and testable.
+
+**For data-based multicollinearity:**
+
+- **Drop one of the correlated predictors** (use subject-matter knowledge to decide which is more scientifically relevant)
+- **Combine correlated variables** into a composite (e.g., weight and height into BMI)
+- **Use regularization** methods (ridge regression, LASSO) in advanced settings
+- **Be cautious** about dropping variables solely to reduce standard errors, as this can introduce omitted variable bias (p-hacking)
+
+### 7. Putting It All Together: A Diagnostic Workflow
+
+A systematic approach to regression diagnostics:
+
+```{r}
+#| label: workflow-table
+#| echo: false
+tibble(
+  Step = 1:7,
+  Action = c(
+    "Fit the model and examine coefficients",
+    "Check residuals vs. fitted plot (linearity + homoscedasticity)",
+    "Check Q-Q plot and histogram (normality)",
+    "If assumptions violated, consider transformations and refit",
+    "Compute VIF for multicollinearity",
+    "Compute leverage, Cook's distance, DFFITS, DFBETAS for influential obs",
+    "Compare model with and without influential observations; report both if different"
+  ),
+  Tools = c(
+    "lm(), tidy(), glance()",
+    "Residuals vs. fitted, Breusch-Pagan test",
+    "Q-Q plot, histogram, Shapiro-Wilk",
+    "log(Y), sqrt(Y), Y^2",
+    "car::vif()",
+    "hatvalues(), cooks.distance(), dffits(), dfbetas()",
+    "Compare coefficients, CIs"
+  )
+) |>
+  kable(caption = "Diagnostic Workflow Summary") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Key Takeaways
+
+| Topic | Key point |
+|-------|-----------|
+| LINE assumptions | Linearity, Independence, Normality, Equal Variance must be checked |
+| Residuals | Jackknife residuals are preferred for outlier detection |
+| Diagnostic plots | Residuals vs. fitted (linearity + variance); Q-Q plot (normality) |
+| Transformations | $\log(Y)$ for right skew; $Y^2$ for left skew |
+| Outlier testing | Use Bonferroni-corrected jackknife residuals |
+| Leverage | Measures extremeness in predictor space; $h_i > 2(p+1)/n$ or $3(p+1)/n$ |
+| Cook's distance | Combines residual and leverage; $D_i > 4/n$ flags potential influence |
+| DFFITS/DFBETAS | Measure influence on fitted values and individual coefficients |
+| Do not auto-delete | Always investigate; report models with and without flagged observations |
+| Multicollinearity | VIF > 10 is strong collinearity; center variables for structural collinearity |
+
+## Part 2: Guided Plot-Reading Examples (In-Class)
+
+In Part 1 we worked through every diagnostic on a single, messy real dataset. The downside of that approach is that *everything* was wrong at once, which makes it hard to learn what each pattern looks like in isolation. In this section we will look at **eight small simulated datasets**, each engineered to display **one clear diagnostic story**. For each example, look at the plot first, decide what you see, then read the explanation.
+
+::: {.callout-note}
+## Purpose of this section
+
+The goal is pattern recognition, not code.
+:::
+
+```{r}
+#| label: part2-setup
+#| message: false
+#| warning: false
+library(tidyverse)
+library(broom)
+library(car)
+set.seed(1220)
+```
+
+### Example 1: The "Clean" Baseline
+
+**Setup:** $Y = 2 + 1.5 X + \varepsilon$, with $\varepsilon \sim N(0, 1)$ and $X \sim N(0,1)$. Everything the textbook asks for is satisfied.
+
+```{r}
+#| label: ex1-clean
+#| fig-alt: "Two diagnostic plots for a simulated well-specified model. Residuals versus fitted is a shapeless cloud around zero with a nearly flat smoother. The Q-Q plot points fall close to the diagonal line."
+n <- 200
+ex1 <- tibble(x = rnorm(n), y = 2 + 1.5 * x + rnorm(n, sd = 1))
+fit1 <- lm(y ~ x, data = ex1)
+
+par(mfrow = c(1, 2))
+plot(fit1, which = 1)   # Residuals vs Fitted
+plot(fit1, which = 2)   # Normal Q-Q
+par(mfrow = c(1, 1))
+```
+
+**Class question:** Looking at these two diagnostic plots, which statement is most accurate?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** The model has serious heteroscedasticity and the variance grows with the fitted values.
+
+
+**B.** The model shows clear nonlinearity that requires a quadratic term.
+
+
+**C.** The diagnostic plots look acceptable: residuals scatter randomly around zero and Q-Q points hug the diagonal.
+
+
+**D.** The residuals are heavily right-skewed and the outcome should be log-transformed.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: C.**
+
+The residuals-vs-fitted plot is a shapeless cloud with a flat loess line, and the Q-Q points fall along the reference line. Linearity holds, variance is constant, and the residuals are approximately normal. *This is the picture you want in your head when you ask "does my model look OK?"*
+
+::: {.callout-important}
+## Remember
+
+**A shapeless cloud with a flat smoother** = nothing to fix on linearity or variance.
+:::
+
+**Real-world analogue:** A well-specified model of adult height regressed on a single, well-measured exposure in a large random sample, e.g., height on years of childhood nutrition supplementation in a cohort with no measurement error.
+:::::
+
+### Example 2: Missed Nonlinearity (the U-curve)
+
+**Setup:** The truth is $Y = 2 + 0.5 X + 0.8 X^2 + \varepsilon$, but we naively fit a straight line in $X$.
+
+```{r}
+#| label: ex2-nonlinear
+#| fig-alt: "Residuals versus fitted plot for a straight-line fit to curved data. The residuals and the smoother form a clear U shape, positive at both ends (up to about 5) and about -2 in the middle."
+ex2 <- tibble(x = runif(n, -3, 3),
+              y = 2 + 0.5 * x + 0.8 * x^2 + rnorm(n, sd = 1))
+fit2 <- lm(y ~ x, data = ex2)
+plot(fit2, which = 1)
+```
+
+**Class question:** The residuals-vs-fitted plot shows residuals that are positive at both ends and negative in the middle, with a clear curved (U-shaped) loess line. What is the *most likely* problem with this model?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** The errors are not normally distributed.
+
+
+**B.** The relationship between $X$ and $Y$ is not linear; the model is missing a curvature term.
+
+
+**C.** There is a single influential observation distorting the fit.
+
+
+**D.** The variance of the residuals increases with the fitted value.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: B.**
+
+A systematic curve in the residuals-vs-fitted plot means the *mean structure* is wrong. The straight line is missing the curvature. Linearity is violated, even though variance might still be constant. The fix is to add a quadratic term, a spline, or transform $X$, not to transform $Y$.
+
+::: {.callout-important}
+## Remember
+
+**A curved smoother = a missing term in the model.**
+:::
+
+**Real-world analogue:** BMI and mortality. The risk is U-shaped (high at very low BMI from frailty/wasting, low in the middle, high at obesity). A linear BMI term will produce exactly this kind of residual smile.
+:::::
+
+### Example 3: Heteroscedasticity (the megaphone)
+
+**Setup:** $Y = 1 + 2X + \varepsilon$, but the noise grows with $X$: $\varepsilon \sim N(0, X^2)$.
+
+```{r}
+#| label: ex3-hetero
+#| fig-alt: "Two diagnostic plots for simulated data whose noise grows with X. Residuals versus fitted fans out like a megaphone, from about plus or minus 2 at fitted values near 5 to about plus or minus 20 near 20, with a smoother that is roughly flat and dips at the right. The scale-location smoother rises steadily from left to right."
+x <- runif(n, 1, 10)
+ex3 <- tibble(x = x, y = 1 + 2 * x + rnorm(n, sd = x))
+fit3 <- lm(y ~ x, data = ex3)
+
+par(mfrow = c(1, 2))
+plot(fit3, which = 1)
+plot(fit3, which = 3)   # Scale-Location
+par(mfrow = c(1, 1))
+```
+
+**Class question:** The residuals form a "megaphone" opening to the right, but the loess line is roughly flat. The Scale-Location line slopes upward. Which assumption is violated, and what is the consequence for inference?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** Linearity is violated; the coefficient estimates are biased.
+
+
+**B.** Normality is violated; the model cannot be used at all.
+
+
+**C.** Equal variance (homoscedasticity) is violated; coefficient estimates are still unbiased, but the standard errors and p-values are wrong.
+
+
+**D.** Independence is violated; the observations must be clustered.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: C.**
+
+A flat loess line with a spreading cloud means the *mean* model is fine but the *variance* is not constant. OLS coefficients remain unbiased, but the formula-based standard errors assume constant variance, so p-values and CIs are misleading. Fix with a variance-stabilizing transformation (log, sqrt), weighted least squares, or robust (sandwich) standard errors.
+
+::: {.callout-important}
+## Remember
+
+**Flat loess + spreading cloud = heteroscedasticity, not nonlinearity.**
+:::
+
+**Real-world analogue:** Annual healthcare expenditures regressed on income. People with low income spend small, similar amounts; high-income people range from frugal to enormous spenders, so variance balloons at the right.
+:::::
+
+### Example 4: Right-Skewed Residuals (the Q-Q hockey stick)
+
+**Setup:** Linear model in the mean, but the errors come from an exponential distribution (heavy right tail).
+
+```{r}
+#| label: ex4-skew
+#| fig-alt: "Two plots for a simulated model with right-skewed errors. The Q-Q plot follows the line in the lower half and curves sharply upward in the upper tail, to about 6. The histogram of studentized residuals is piled up just below zero with a long right tail."
+x <- rnorm(n)
+ex4 <- tibble(x = x, y = 2 + 1.5 * x + (rexp(n, rate = 1) - 1))
+fit4 <- lm(y ~ x, data = ex4)
+
+par(mfrow = c(1, 2))
+plot(fit4, which = 2)   # Q-Q
+hist(rstudent(fit4), breaks = 30, col = "steelblue", border = "white",
+     main = "Studentized residuals", xlab = "")
+par(mfrow = c(1, 1))
+```
+
+**Class question:** The Q-Q plot tracks the diagonal in the lower half but curves sharply upward in the upper-right tail (a "hockey stick"), and the histogram has a long right tail. What does this pattern indicate, and what is an appropriate first remedy?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** The residuals are left-skewed; square the outcome.
+
+
+**B.** The residuals are right-skewed; try a log or square-root transformation of the outcome.
+
+
+**C.** The residuals are normal but the variance is non-constant; use weighted least squares.
+
+
+**D.** There are several high-leverage points pulling the upper tail.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: B.**
+
+When the upper tail of the Q-Q plot peels *upward* off the line, the residuals have a long right tail, i.e., right skew. Coefficient *estimates* remain unbiased (and the CLT helps with large $n$), but **prediction intervals will be wrong** and small-sample inference is unreliable. A log or square-root transformation of $Y$ is the standard first move.
+
+::: {.callout-important}
+## Remember
+
+**Upper tail peels up = right skew → log or sqrt $Y$.** Lower tail peels down = left skew → square $Y$.
+:::
+
+**Real-world analogue:** Hospital length-of-stay regressed on patient characteristics. Most people leave in 2–4 days; a small number stay for weeks. The same shape arises for healthcare costs, viral loads, and income.
+:::::
+
+### Example 5: One Influential High-Leverage Point
+
+**Setup:** Clean linear data, but we deliberately add a single observation far out in $X$ with the "wrong" $Y$.
+
+```{r}
+#| label: ex5-influential
+#| fig-alt: !expr sprintf("Two plots for simulated linear data plus one bad point at x = 10, y = -8. The scatter plot shows a cloud rising steeply, but the fitted red line is pulled flatter by the bad point (slope %.2f; %.2f without it). The residuals versus leverage plot shows that point alone at leverage about %.2f, far beyond the Cook's distance contours of 0.5 and 1.", coef(fit5)[2], coef(lm(y ~ x, data = ex5[-n, ]))[2], hatvalues(fit5)[n])
+x5 <- c(rnorm(n - 1), 10)
+ex5 <- tibble(x = x5,
+              y = c(2 + 1.5 * x5[-n] + rnorm(n - 1, sd = 1), -8))
+fit5 <- lm(y ~ x, data = ex5)
+
+par(mfrow = c(1, 2))
+plot(ex5$x, ex5$y, pch = 19, col = "steelblue",
+     main = "Data with one bad point", xlab = "x", ylab = "y")
+abline(fit5, col = "red", lwd = 2)
+plot(fit5, which = 5)   # Residuals vs Leverage with Cook's contours
+par(mfrow = c(1, 1))
+```
+
+**Class question:** The scatterplot shows that the regression line is visibly tilted by a single extreme point, and that same point sits far to the right of the residuals-vs-leverage plot, outside the dashed Cook's distance contours. How would you describe this observation?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** It has high leverage but is not influential, so we can ignore it.
+
+
+**B.** It has a large residual but low leverage, so it cannot affect the slope.
+
+
+**C.** It has both high leverage *and* a large residual, making it influential: removing it would meaningfully change the regression coefficients.
+
+
+**D.** It is a normal observation; Cook's distance contours always look like this.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: C.**
+
+This point has high leverage (extreme in $X$) *and* a large residual. That is the dangerous combination: it is **influential**, and removing it would meaningfully change the slope. Always investigate such points; do not delete them automatically.
+
+::: {.callout-important}
+## Remember
+
+**High leverage alone is fine. High leverage + big residual = influence.** The upper-right and lower-right corners of residuals-vs-leverage are the danger zones.
+:::
+
+**Real-world analogue:** A county-level study of opioid prescribing rates and overdose deaths where one tiny rural county has both an extreme prescribing rate and a wildly different death rate (perhaps because of a single pill mill). That one county can rotate the entire regression line.
+:::::
+
+### Example 6: A Y-Outlier with Little Influence
+
+**Setup:** Clean data, but we corrupt one mid-range observation by setting its $Y$ very far from the line. Crucially, the bad point has an **average** $X$ value.
+
+```{r}
+#| label: ex6-outlier-noinfluence
+#| fig-alt: "Two plots for simulated linear data with one point at x = 0 moved up to y = 25. The scatter plot shows the point far above the cloud while the fitted line still runs through the cloud. The residuals versus leverage plot shows that point with a standardized residual above 10 but among the lowest leverage in the data, inside the Cook's distance contours."
+ex6 <- tibble(x = rnorm(n), y = 2 + 1.5 * x + rnorm(n, sd = 1))
+ex6$x[100] <- 0    # put the bad point at the center of X ...
+ex6$y[100] <- 25   # ... and give it an extreme Y
+fit6 <- lm(y ~ x, data = ex6)
+
+par(mfrow = c(1, 2))
+plot(ex6$x, ex6$y, pch = 19, col = "steelblue",
+     main = "Outlier in Y, average X", xlab = "x", ylab = "y")
+abline(fit6, col = "red", lwd = 2)
+plot(fit6, which = 5)
+par(mfrow = c(1, 1))
+```
+
+**Class question:** One observation has a very large residual (it shoots up far above the regression line), but the regression line barely moves and that point's leverage is among the lowest in the data, because its X sits at the center. Should you be worried?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** Yes: any large residual must be removed before refitting.
+
+
+**B.** Yes: large residuals always cause biased coefficient estimates.
+
+
+**C.** Not very: without leverage, a Y-outlier cannot rotate the line; you should still investigate it (data entry error?), but the model is essentially unchanged.
+
+
+**D.** No: large residuals never matter at all.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: C.**
+
+Big residuals are not automatically a crisis. Without leverage, an outlier in $Y$ cannot rotate the line, only nudge the intercept very slightly. Always investigate the point (data entry? unusual case?), but the coefficients are essentially unchanged.
+
+::: {.callout-important}
+## Remember
+
+**A residual outlier in the middle of the X cloud is mostly harmless.** Investigate, do not panic, and never delete automatically.
+:::
+
+**Real-world analogue:** A typing error in REDCap where someone's reported number of cigarettes per day was entered as 250 instead of 25. If their other characteristics are average, the model coefficients hardly budge, but the residual will scream.
+:::::
+
+### Example 7: Severe Multicollinearity
+
+**Setup:** Two predictors that are almost the same variable. The truth uses both, but they carry nearly identical information.
+
+```{r}
+#| label: ex7-collinear
+x1 <- rnorm(n)
+x2 <- x1 + rnorm(n, sd = 0.03)  # x2 is essentially x1
+ex7 <- tibble(x1 = x1, x2 = x2, y = 1 + 2 * x1 + 1.5 * x2 + rnorm(n))
+fit7 <- lm(y ~ x1 + x2, data = ex7)
+
+tidy(fit7) |> knitr::kable(digits = 3, caption = "Coefficients (note the SEs)")
+glance(fit7) |> dplyr::select(r.squared, statistic, p.value)   # overall F-test
+car::vif(fit7)
+cor(ex7$x1, ex7$x2)
+```
+
+**Class question:** The model output shows that the overall $F$-test is highly significant (`r fmt_p(pf(summary(fit7)$fstatistic[1], 2, n - 3, lower.tail = FALSE))`), but `r if (all(coef(summary(fit7))[2:3, 4] >= 0.05)) "neither individual coefficient ($x_1$ or $x_2$) is significant" else "the individual coefficients are not both significant"` at $\alpha = 0.05$ (p = `r round(coef(summary(fit7))[2, 4], 2)` and `r round(coef(summary(fit7))[3, 4], 2)`). Both VIFs are about `r round(car::vif(fit7)[1])`. What is going on?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** The model is misspecified: neither predictor actually matters.
+
+
+**B.** There is severe multicollinearity: $x_1$ and $x_2$ carry nearly the same information, so the data cannot separate their individual effects, even though together they predict $y$ well.
+
+
+**C.** The sample size is too small to detect either effect.
+
+
+**D.** The residuals are not normally distributed.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: B.**
+
+The classic collinearity signature: large overall $F$, no significant individual $t$-tests, and VIFs $\gg 10$. The data cannot tell $x_1$ apart from $x_2$, so it cannot give either one a stable coefficient. *Predictions* from the model are fine; the *individual coefficients* are not interpretable.
+
+::: {.callout-important}
+## Remember
+
+**Big F, no significant t's, huge VIFs = collinearity.** Drop one or combine them (centering does not help here, because the two variables stay just as correlated); do not interpret the individual coefficients as if they were independent effects.
+:::
+
+**Real-world analogue:** Putting both systolic and diastolic blood pressure (or both LDL and total cholesterol) into the same model as predictors of cardiovascular events. They move together, and the model cannot separate their independent effects.
+:::::
+
+### Example 8: Big Sample, Trivial Departure, Test Screams Anyway
+
+**Setup:** A nearly-perfect linear model with $n = 5{,}000$ and a tiny amount of variance growth in $X$. The plot looks fine. The Breusch–Pagan test rejects.
+
+```{r}
+#| label: ex8-bigN
+#| fig-alt: "Residuals versus fitted plot for a simulated linear model with 5,000 points and slightly increasing noise. The residuals form an even band around zero, about plus or minus 3, with a flat smoother; the band is only slightly wider on the right."
+n_big <- 5000
+x <- runif(n_big, 1, 10)
+ex8 <- tibble(x = x, y = 1 + 2 * x + rnorm(n_big, sd = 1 + 0.05 * x))
+fit8 <- lm(y ~ x, data = ex8)
+
+plot(fit8, which = 1)
+car::ncvTest(fit8)
+```
+
+**Class question:** With $n = 5{,}000$, the residuals-vs-fitted plot looks essentially fine (only a hint of extra spread on the right), but the Breusch–Pagan test rejects with $p < 2.2 \times 10^{-16}$. What should you do?
+
+::: {.callout-note appearance="simple" icon="false"}
+## Choose one
+
+**A.** Trust the test: refit using log $Y$ immediately because heteroscedasticity is "proven."
+
+
+**B.** Trust the plot: in very large samples, formal assumption tests reject trivial departures that do not affect inference. The visual is more informative here.
+
+
+**C.** Drop observations until the BP test is non-significant.
+
+
+**D.** Conclude that the model is unusable and abandon the analysis.
+:::
+
+::::: {.callout-tip collapse="true"}
+## Show the answer
+
+**Answer: B.**
+
+With huge samples, formal tests detect departures so small they would not change a single decision you make. The visual is more informative than the p-value here. The opposite happens with small samples: tests *miss* real problems that the plot reveals.
+
+::: {.callout-important}
+## Remember
+
+**Trust the plot first, the test second.** In big-n epidemiology (BRFSS, NHANES, EHR data), assume formal assumption tests will reject *something*, go look at the picture.
+:::
+
+**Real-world analogue:** Any analysis of EHR data with hundreds of thousands of rows. Shapiro–Wilk, Breusch–Pagan, and Ramsey RESET will *all* reject. That does not mean the model is unusable; it means the diagnostic plots, not the p-values, should guide your judgment.
+:::::
+
+### Quick Recap Card
+
+| Example | Pattern | Memorable cue |
+|---|---|---|
+| 1. Clean | Shapeless cloud, flat smoother | "Boring is good." |
+| 2. Nonlinearity | U-shape in residuals vs fitted | "Curve = missing term." |
+| 3. Heteroscedasticity | Megaphone, sloped Scale-Location | "Spreading, not curving." |
+| 4. Skewed residuals | Q-Q hockey stick on the right | "Upper tail peels up = log Y." |
+| 5. Influential point | Line tilted; point past Cook's contours | "High leverage + big residual = danger." |
+| 6. Y-outlier, low leverage | Big residual, line unchanged | "Average X = nearly harmless." |
+| 7. Collinearity | Big F, no t's, VIF $\gg 10$ | "Same info twice." |
+| 8. Big-n test trap | Plot OK, BP test tiny p | "Trust the picture." |
+
+## Part 3: Take-Home Practice Lab
+
+This lab is optional practice for your own time; it is not graded.
+
+[Download the lab template (.qmd)](../labs/templates/template-diagnostics-lab.qmd){.btn .btn-sm .btn-outline-primary download="diagnostics-lab.qmd"}
+
+### Instructions
+
+In this lab, you will conduct a thorough diagnostic assessment of a regression model using the BRFSS 2020 dataset.
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The **outcome** for the lab is `menthlth_days` and you will build a model with a **different set** of predictors than the guided practice.
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `menthlth_days` | Mentally unhealthy days in past 30 | Continuous (0--30) |
+| `physhlth_days` | Physically unhealthy days in past 30 | Continuous (0--30) |
+| `sleep_hrs` | Sleep hours per night | Continuous (1--14) |
+| `age` | Age in years (capped at 80) | Continuous |
+| `sex` | Sex (Male/Female) | Factor |
+| `bmi` | Body mass index | Continuous |
+| `exercise` | Any physical activity (Yes/No) | Factor |
+| `income_cat` | Household income (1--8 ordinal) | Numeric |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(car)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2")
+) |>
+  janitor::clean_names()
+
+brfss_dx <- brfss_full |>
+  mutate(
+    # Outcome
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(menthlth_days), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat)
+  )
+
+set.seed(1220)
+brfss_dx <- brfss_dx |>
+  dplyr::select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Fit a Model and Check Assumptions (20 points)
+
+**1a. (5 pts)** Fit the model: `menthlth_days ~ physhlth_days + sleep_hrs + age + sex + exercise + income_cat`. Report the model coefficients, $R^2$, and Adjusted $R^2$.
+
+**1b. (5 pts)** Create a residuals vs. fitted values plot using jackknife residuals. Include a loess smoothing line. Does the linearity assumption appear to hold? What about homoscedasticity?
+
+**1c. (5 pts)** Create a normal Q-Q plot of the jackknife residuals. Does the normality assumption hold? Describe the specific pattern you observe (e.g., right skew, heavy tails, etc.).
+
+**1d. (5 pts)** Run the Breusch-Pagan test for heteroscedasticity using `car::ncvTest()`. Report the test statistic and p-value. Given the large sample size, how should you weigh the formal test result against the visual evidence from your residual plot?
+
+### Task 2: Transformations (15 points)
+
+**2a. (5 pts)** Based on your diagnostic plots in Task 1, apply an appropriate transformation to the outcome variable (e.g., $\log(Y+1)$ or $\sqrt{Y}$). Refit the model and create a new Q-Q plot. Did the transformation improve normality?
+
+**2b. (5 pts)** Create residuals vs. fitted plots for both the original and transformed models side by side. Compare the patterns.
+
+**2c. (5 pts)** In 2--3 sentences, explain how the transformation changes the interpretation of the regression coefficients. Is the trade-off worth it?
+
+### Task 3: Outlier Detection (25 points)
+
+**3a. (5 pts)** Compute jackknife residuals for the original (untransformed) model. What are the minimum and maximum jackknife residuals? How many observations have $|r_{(-i)}| > 3$?
+
+**3b. (10 pts)** Perform a formal Bonferroni-corrected outlier test. Calculate the critical value manually using `qt()` and then verify using `car::outlierTest()`. Are any observations statistically significant outliers?
+
+**3c. (5 pts)** For the top 5 observations with the largest absolute jackknife residuals, examine their predictor values. Is there anything unusual about these observations? Create a table showing their values.
+
+**3d. (5 pts)** In 2--3 sentences, explain why it is important to use the Bonferroni correction when testing multiple residuals for outlier status.
+
+### Task 4: Leverage and Influence (25 points)
+
+**4a. (5 pts)** Compute the leverage ($h_i$) for all observations. Report the average leverage. How many observations exceed the $3\bar{h}$ threshold?
+
+**4b. (5 pts)** Compute Cook's distance for all observations. Using the $4/n$ threshold, how many observations are potentially influential?
+
+**4c. (5 pts)** Create a scatterplot of jackknife residuals vs. leverage with point size proportional to Cook's distance. Identify any observations that are both high-leverage and have large residuals.
+
+**4d. (5 pts)** Refit the model after removing all observations with Cook's distance $> 4/n$. Compare the coefficients with the full-data model in a single table. Do any coefficients change substantially?
+
+**4e. (5 pts)** A colleague argues: "We should just remove all outliers and high-leverage points to get a cleaner model." Write a 3--4 sentence response explaining why this approach is problematic.
+
+### Task 5: Multicollinearity Assessment (15 points)
+
+**5a. (5 pts)** Compute the VIF for all predictors in your model. Present the results in a table with VIF, tolerance, and a flag column. Is there evidence of multicollinearity?
+
+**5b. (5 pts)** Create a pairwise correlation matrix for the continuous predictors. Which pair has the strongest correlation?
+
+**5c. (5 pts)** Suppose you wanted to add a quadratic term for BMI to the model ($\text{bmi}^2$). Compute the VIF for `bmi` and `bmi_sq` in this expanded model. Then center BMI and recompute. Show that centering reduces the VIF. Why does centering help?
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

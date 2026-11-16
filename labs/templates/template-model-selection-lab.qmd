@@ -1,0 +1,265 @@
+---
+title: "Model Selection Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(leaps)
+library(MASS)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("PHYSHLTH", "SLEPTIM1", "MENTHLTH", "_AGE80", "SEXVAR", "EDUCA",
+           "EXERANY2", "GENHLTH", "INCOME2", "_BMI5")
+) |>
+  janitor::clean_names()
+
+brfss_ms <- brfss_full |>
+  mutate(
+    # Outcome
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    # Candidate predictors
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_)
+  ) |>
+  filter(
+    !is.na(physhlth_days), !is.na(menthlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(education),
+    !is.na(exercise), !is.na(gen_health), !is.na(income_cat), !is.na(bmi)
+  )
+
+set.seed(1220)
+brfss_ms <- brfss_ms |>
+  dplyr::select(physhlth_days, menthlth_days, sleep_hrs, age, sex,
+                education, exercise, gen_health, income_cat, bmi) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Maximum Model and Criteria Comparison (15 points)
+
+**1a. (5 pts)** Fit the maximum model predicting `physhlth_days` from all 9 candidate predictors. Report $R^2$, Adjusted $R^2$, AIC, and BIC.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Now fit a "minimal" model using only `menthlth_days` and `age`. Report the same four criteria. How do the two models compare?
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Explain why $R^2$ is a poor criterion for comparing these two models. What makes Adjusted $R^2$, AIC, and BIC better choices?
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: Best Subsets Regression (20 points)
+
+**2a. (5 pts)** Use `leaps::regsubsets()` to perform best subsets regression with `nvmax = 15`. Create a plot of Adjusted $R^2$ vs. number of variables. At what model size does Adjusted $R^2$ plateau?
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Create a plot of BIC vs. number of variables. Which model size minimizes BIC?
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** Identify the variables included in the BIC-best model. Fit this model explicitly using `lm()` and report its coefficients.
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+**2d. (5 pts)** Compare the BIC-best model to the Adjusted $R^2$-best model. Are they the same? If not, which would you prefer and why?
+
+```{r}
+#| label: task-2d
+
+```
+
+*Your answer:*
+
+## Task 3: Automated Selection Methods (20 points)
+
+**3a. (5 pts)** Perform backward elimination using `step()` with AIC as the criterion. Which variables are removed? Which remain?
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (5 pts)** Perform forward selection using `step()`. Does it arrive at the same model as backward elimination?
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (5 pts)** Compare the backward, forward, and stepwise results in a single table showing the number of variables, Adjusted $R^2$, AIC, and BIC for each.
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+**3d. (5 pts)** List three reasons why you should not blindly trust the results of automated variable selection. Which of these concerns is most relevant for epidemiological research?
+
+```{r}
+#| label: task-3d
+
+```
+
+*Your answer:*
+
+## Task 4: Associative Model Building (25 points)
+
+For this task, the **exposure** is `sleep_hrs` and the **outcome** is `physhlth_days`. You are building an associative model to estimate the effect of sleep on physical health.
+
+**4a. (5 pts)** Fit the crude model: `physhlth_days ~ sleep_hrs`. Report the sleep coefficient.
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (10 pts)** Fit the maximum associative model: `physhlth_days ~ sleep_hrs + [all other covariates]`. Note the adjusted sleep coefficient and compute the 10% interval. Then systematically remove each covariate one at a time and determine which are confounders using the 10% rule. Present your results in a summary table.
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** Fit the final associative model including only sleep and the identified confounders. Report the sleep coefficient and its 95% CI.
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+**4d. (5 pts)** A reviewer asks: "Why didn't you just use stepwise selection?" Write a **3--4 sentence response** explaining why automated selection is inappropriate for this associative analysis.
+
+```{r}
+#| label: task-4d
+
+```
+
+*Your answer:*
+
+## Task 5: Synthesis (20 points)
+
+**5a. (10 pts)** You have now built two models for the same data:
+
+- A **predictive** model (from Task 2 or 3, the best model by AIC/BIC)
+- An **associative** model (from Task 4, focused on sleep)
+
+Compare these two models: Do they include the same variables? Is the sleep coefficient similar? Why might they differ?
+
+```{r}
+#| label: task-5a
+
+```
+
+*Your answer:*
+
+**5b. (10 pts)** Write a **4--5 sentence paragraph** for a public health audience describing the results of your associative model. Include:
+
+- The adjusted effect of sleep on physical health days
+- Which variables needed to be accounted for (confounders)
+- The direction and approximate magnitude of the association
+- A caveat about cross-sectional data
+
+Do not use statistical jargon.
+
+```{r}
+#| label: task-5b
+
+```
+
+*Your answer:*

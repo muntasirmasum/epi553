@@ -791,7 +791,11 @@ In this lab, you will:
 
 ### Lab Setup
 
-Put this code at the top of your lab `.qmd`. It builds the same 2,000-person sample as the lecture (install the packages once with `install.packages(c("brfssdata", "janitor"))`).
+[Download the lab template (.qmd)](../labs/templates/template-statistical-modeling-lab.qmd){.btn .btn-sm .btn-outline-primary download="statistical-modeling-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task with its starter code. Save it as `LastName_FirstName_Statistical_Modeling_Lab.qmd`.
+
+The setup code builds the same 2,000-person sample as the lecture (install the packages once with `install.packages(c("brfssdata", "janitor"))`).
 
 ```{r}
 #| label: lab-setup

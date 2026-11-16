@@ -1,0 +1,1128 @@
+---
+title: "Dummy Variables"
+subtitle: "Put categorical predictors into a regression model and interpret each comparison."
+description: "Dummy (indicator) coding, reference groups, the dummy variable trap, partial F-tests for a categorical variable, and effect and polynomial contrasts, using education and mentally unhealthy days in BRFSS 2020."
+order: 8
+unit: "Linear regression"
+categories: [Linear regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- explain why a categorical predictor cannot enter a model as numeric codes;
+- build dummy (indicator) variables for a predictor with two or more categories;
+- interpret each dummy coefficient as a comparison with the reference group;
+- change the reference group and explain what changes and what does not;
+- test a categorical variable as a whole with a partial F-test;
+- describe effect coding and polynomial contrasts and when to use them.
+:::
+
+## Introduction
+
+In the previous lectures on Multiple Linear Regression, all predictors we used were either continuous (sleep hours, age, physical health days) or binary (sex, exercise). But many variables in epidemiology are **categorical with more than two levels**, including race/ethnicity, education, marital status, and disease staging.
+
+When a categorical predictor has $k$ levels, we cannot simply plug in the numeric codes (1, 2, 3, ...) as if the variable were continuous. Doing so imposes an assumption that the categories are equally spaced and linearly related to the outcome, which is rarely appropriate for nominal variables and often inappropriate even for ordinal ones.
+
+**Dummy variables** (also called indicator variables) provide the correct way to include categorical predictors in regression models. This lecture covers:
+
+- Why numeric coding of categories fails
+- How to construct dummy variables for dichotomous and multichotomous predictors
+- The concept of the reference group and how to change it
+- Interpreting dummy variable coefficients
+- Testing whether a categorical variable as a whole is significant (partial F-test)
+- Alternative coding schemes (effect coding, ordinal contrasts)
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(car)
+library(ggeffects)
+```
+
+### The BRFSS 2020 Dataset
+
+We continue using the **Behavioral Risk Factor Surveillance System (BRFSS) 2020** dataset. In this lecture, we focus on how categorical predictors, particularly **education level**, relate to mental health outcomes.
+
+**Research question for today:**
+
+> *How is educational attainment associated with the number of mentally unhealthy days in the past 30 days, after adjusting for age, sex, physical health, and sleep?*
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode eight variables and draw a random sample of 5,000 adults with complete data.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the eight BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "EDUCA",
+           "GENHLTH", "MARITAL")
+) |>
+  janitor::clean_names()
+```
+
+```{r}
+#| label: prepare-data
+brfss_dv <- brfss_full |>
+  mutate(
+    # Outcome: mentally unhealthy days in past 30
+    menthlth_days = case_when(
+      menthlth == 88                    ~ 0,
+      menthlth >= 1 & menthlth <= 30   ~ as.numeric(menthlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Physical health days
+    physhlth_days = case_when(
+      physhlth == 88                    ~ 0,
+      physhlth >= 1 & physhlth <= 30   ~ as.numeric(physhlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Sleep hours
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14   ~ as.numeric(sleptim1),
+      TRUE                             ~ NA_real_
+    ),
+    # Age
+    age = age80,
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Education (6-level raw BRFSS variable EDUCA)
+    # 1 = Never attended school or only kindergarten
+    # 2 = Grades 1 through 8 (Elementary)
+    # 3 = Grades 9 through 11 (Some high school)
+    # 4 = Grade 12 or GED (High school graduate)
+    # 5 = College 1 year to 3 years (Some college or technical school)
+    # 6 = College 4 years or more (College graduate)
+    # 9 = Refused
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    # General health status (5-level)
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    # Marital status
+    marital_status = factor(case_when(
+      marital == 1 ~ "Married",
+      marital == 2 ~ "Divorced",
+      marital == 3 ~ "Widowed",
+      marital == 4 ~ "Separated",
+      marital == 5 ~ "Never married",
+      marital == 6 ~ "Unmarried couple",
+      TRUE         ~ NA_character_
+    ), levels = c("Married", "Divorced", "Widowed", "Separated",
+                  "Never married", "Unmarried couple")),
+    # Store the raw education numeric code for the "naive approach" demonstration
+    educ_numeric = case_when(
+      educa %in% c(1, 2, 3) ~ 1,
+      educa == 4             ~ 2,
+      educa == 5             ~ 3,
+      educa == 6             ~ 4,
+      TRUE                   ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(menthlth_days),
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(age), age >= 18,
+    !is.na(sex),
+    !is.na(education),
+    !is.na(gen_health),
+    !is.na(marital_status)
+  )
+
+# Reproducible random sample
+set.seed(1220)
+brfss_dv <- brfss_dv |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+         education, gen_health, marital_status, educ_numeric) |>
+  slice_sample(n = 5000)
+
+tibble(Metric = c("Observations", "Variables"),
+       Value  = c(nrow(brfss_dv), ncol(brfss_dv))) |>
+  kable(caption = "Analytic Dataset Dimensions") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Descriptive Statistics
+
+```{r}
+#| label: descriptive-gtsummary
+brfss_dv |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+         education, gen_health) |>
+  tbl_summary(
+    label = list(
+      menthlth_days  ~ "Mentally unhealthy days (past 30)",
+      physhlth_days  ~ "Physically unhealthy days (past 30)",
+      sleep_hrs      ~ "Sleep (hours/night)",
+      age            ~ "Age (years)",
+      sex            ~ "Sex",
+      education      ~ "Education level",
+      gen_health     ~ "General health status"
+    ),
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 1,
+    missing = "no"
+  ) |>
+  add_n() |>
+  bold_labels() |>
+  italicize_levels() |>
+  modify_caption("Table 1. Descriptive statistics, BRFSS 2020 analytic sample (n = 5,000)") |>
+  as_kable_extra()
+```
+
+```{r}
+#| label: education-barplot
+#| fig-alt: !expr local({n <- table(brfss_dv$education); paste0("Bar chart of education level in the sample of 5,000 adults. ", paste0(names(n), " ", formatC(as.integer(n), big.mark = ",", format = "d"), collapse = ", "), "; college graduates are the largest group and fewer than 1 in 15 did not finish high school.")})
+#| fig-cap: Distribution of Education Level in Analytic Sample
+ggplot(brfss_dv, aes(x = education, fill = education)) +
+  geom_bar(alpha = 0.85, color = "gray30") +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.3) +
+  scale_fill_brewer(palette = "Blues") +
+  labs(
+    title = "Distribution of Education Level",
+    subtitle = "BRFSS 2020 Analytic Sample (n = 5,000)",
+    x = "Education Level",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| label: outcome-by-education
+#| fig-alt: !expr local({q <- tapply(brfss_dv$menthlth_days, brfss_dv$education, quantile, 0.75); paste0("Box plots of mentally unhealthy days by education level. All four medians are 0 days; the upper quartiles are ", paste0(round(q), " (", names(q), ")", collapse = ", "), ". Every group has outlying points up to 30 days.")})
+#| fig-cap: Mental Health Days by Education Level
+ggplot(brfss_dv, aes(x = education, y = menthlth_days, fill = education)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.2) +
+  scale_fill_brewer(palette = "Blues") +
+  labs(
+    title = "Mentally Unhealthy Days by Education Level",
+    subtitle = "BRFSS 2020 (n = 5,000)",
+    x = "Education Level",
+    y = "Mentally Unhealthy Days (Past 30)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+## Part 1: Guided Practice
+
+### 1. Categorical Variables: The Problem
+
+#### 1.1 Types of Categorical Variables
+
+Categorical predictor variables come in two forms:
+
+| Type | Definition | Examples |
+|------|-----------|----------|
+| **Nominal** | Categories with no natural ordering | Sex, race/ethnicity, marital status, blood type |
+| **Ordinal** | Categories with a meaningful order | Education level, income bracket, disease stage, Likert scale |
+
+A further distinction is:
+
+- **Dichotomous (k = 2):** Only two categories (e.g., sex: Male/Female)
+- **Multichotomous (k > 2):** Three or more categories (e.g., education: 4 levels)
+
+Note that categorical variables can also be created by grouping continuous variables (e.g., age groups from continuous age), though this generally results in a loss of information.
+
+#### 1.2 The Naive Approach: Why Numeric Codes Fail
+
+Suppose education has been coded as: 1 = Less than HS, 2 = HS graduate, 3 = Some college, 4 = College graduate.
+
+If we include this numeric code directly in a regression model, we are assuming:
+
+$$Y = \beta_0 + \beta_1 X_1 + \beta_2 \cdot \text{educ_numeric} + \varepsilon$$
+
+This forces the model to assume that the difference in expected $Y$ between "Less than HS" and "HS graduate" is the **same** as the difference between "HS graduate" and "Some college," and the same again between "Some college" and "College graduate." In other words, we are assuming equally spaced, linear increments.
+
+```{r}
+#| label: naive-model
+# The WRONG way: treating education as a continuous numeric variable
+naive_mod <- lm(menthlth_days ~ age + educ_numeric, data = brfss_dv)
+
+tidy(naive_mod, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Naive Model: Education Treated as Continuous",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+This model estimates a single coefficient for education, meaning each step up the education ladder is associated with the same change in mentally unhealthy days. This constraint is problematic for two reasons:
+
+1. **For nominal variables** (like race or marital status), numeric codes are entirely arbitrary. The "distance" between code 1 and code 2 has no meaning.
+2. **Even for ordinal variables** (like education), the assumption of equal spacing is rarely justified. The jump from "Less than HS" to "HS graduate" is substantively different from "Some college" to "College graduate."
+
+Let's visualize why this matters:
+
+```{r}
+#| label: naive-vs-correct-viz
+#| fig-alt: !expr local({m <- group_means[order(group_means$educ_numeric), ]; paste0("Observed mean mentally unhealthy days by education level (blue dots) and the naive linear fit (red triangles on a dashed line). The observed means are ", paste(round(m$mean_days, 2), collapse = ", "), " days from less than high school to college graduate, so they dip at high school graduate and rise again at some college; the straight line falls evenly from ", round(pred_naive$predicted[1], 2), " to ", round(pred_naive$predicted[4], 2), " and misses that pattern.")})
+#| fig-cap: Naive Linear Fit vs. Actual Group Means by Education
+# Compute observed group means
+group_means <- brfss_dv |>
+  summarise(mean_days = mean(menthlth_days), .by = c(education, educ_numeric))
+
+# Generate predictions from the naive model
+pred_naive <- tibble(
+  educ_numeric = 1:4,
+  predicted = predict(naive_mod, newdata = tibble(age = mean(brfss_dv$age), educ_numeric = 1:4))
+)
+
+ggplot() +
+  geom_point(data = group_means,
+             aes(x = educ_numeric, y = mean_days),
+             size = 4, color = "steelblue") +
+  geom_line(data = pred_naive,
+            aes(x = educ_numeric, y = predicted),
+            color = "tomato", linewidth = 1.2, linetype = "dashed") +
+  geom_point(data = pred_naive,
+             aes(x = educ_numeric, y = predicted),
+             size = 3, color = "tomato", shape = 17) +
+  scale_x_continuous(
+    breaks = 1:4,
+    labels = c("Less than HS", "HS graduate", "Some college", "College graduate"),
+    expand = expansion(mult = 0.12)
+  ) +
+  labs(
+    title = "Observed Group Means (blue) vs. Naive Linear Fit (red)",
+    subtitle = "The naive model forces equal spacing between education levels",
+    x = "Education Level",
+    y = "Mean Mentally Unhealthy Days"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+::: {.callout-important}
+## Key takeaway
+
+The blue dots (observed means) do not fall along a straight line. The naive linear model (red) misrepresents the actual pattern. We need a more flexible approach.
+:::
+
+### 2. Dummy (Indicator) Variables
+
+#### 2.1 Definition and the k - 1 Rule
+
+A **dummy variable** (also called an indicator variable) is a variable that takes on only two possible values:
+
+- **1** to indicate the presence of a condition
+- **0** to indicate its absence
+
+If a categorical predictor has $k$ categories, we need exactly $k - 1$ dummy variables when the model includes an intercept. The omitted category becomes the **reference group** (also called the control group or baseline group).
+
+Why $k - 1$ and not $k$? Because the intercept already captures the mean for the reference group. Including all $k$ dummies plus the intercept would create **perfect multicollinearity** (the dummy variables would sum to equal the intercept column), and the model could not be estimated.
+
+#### 2.2 The Dichotomous Case (k = 2)
+
+The simplest example is a variable with two categories, such as sex.
+
+With $k = 2$, we need $2 - 1 = 1$ dummy variable. If we choose Female as the reference group:
+
+$$\text{male} = \begin{cases} 1 & \text{if male} \\ 0 & \text{if female} \end{cases}$$
+
+The regression model becomes:
+
+$$Y = \beta_0 + \beta_1 \cdot \text{age} + \beta_2 \cdot \text{male} + \varepsilon$$
+
+For males ($\text{male} = 1$):
+$$E(Y | \text{age}, \text{male}) = (\beta_0 + \beta_2) + \beta_1 \cdot \text{age}$$
+
+For females ($\text{male} = 0$):
+$$E(Y | \text{age}, \text{female}) = \beta_0 + \beta_1 \cdot \text{age}$$
+
+Both groups share the **same slope** for age but have **different intercepts**. The coefficient $\beta_2$ is the expected difference in $Y$ between males and females, holding age constant.
+
+```{r}
+#| label: dichotomous-example
+# Fit model with sex as a dummy variable
+mod_sex <- lm(menthlth_days ~ age + sex, data = brfss_dv)
+
+tidy(mod_sex, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Model with Dichotomous Dummy Variable: Sex",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: sex-coef
+b_sex <- round(coef(mod_sex), 3)
+```
+
+**Interpretation:**
+
+- **Intercept (`r b_sex[1]`):** The estimated mean number of mentally unhealthy days for a male of age 0. (This is a mathematical artifact, not a substantive value.)
+- **Age (`r b_sex[2]`):** Each additional year of age is associated with `r abs(b_sex[2])` `r more_fewer(b_sex[2])` mentally unhealthy days, holding sex constant.
+- **Sex: Female (`r b_sex[3]`):** Compared to males (the reference group), females report an estimated `r abs(b_sex[3])` `r more_fewer(b_sex[3])` mentally unhealthy days on average, holding age constant.
+
+::: {.callout-note}
+Note that R automatically creates dummy variables when a factor is included in `lm()`. It uses the first level of the factor as the reference group (alphabetical order unless the levels are set, as they are here), which is why Male, the first level, is the reference here.
+:::
+
+```{r}
+#| label: parallel-lines-plot
+#| fig-alt: !expr local({g <- as.data.frame(pred_sex); v <- function(a, s) round(g$predicted[g$x == a & g$group == s], 1); paste0("Predicted mentally unhealthy days against age (20 to 80) for men and women, with 95% confidence bands. The two lines are parallel and fall with age, from ", v(20, "Female"), " (women) and ", v(20, "Male"), " (men) at age 20 to ", v(80, "Female"), " and ", v(80, "Male"), " at age 80; women are ", round(coef(mod_sex)["sexFemale"], 1), " days higher at every age.")})
+#| fig-cap: 'Parallel Regression Lines: Males vs. Females'
+pred_sex <- ggpredict(mod_sex, terms = c("age [20:80]", "sex"))
+
+ggplot(pred_sex, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15, color = NA) +
+  labs(
+    title    = "Predicted Mental Health Days by Age and Sex",
+    subtitle = "Parallel lines: same slope, different intercepts",
+    x        = "Age (years)",
+    y        = "Predicted Mentally Unhealthy Days",
+    color    = "Sex",
+    fill     = "Sex"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+::: {.callout-note}
+## Geometrically
+
+Dummy variables produce parallel regression lines. The intercept shifts by $\beta_2$ for the non-reference group, but the slope remains the same.
+:::
+
+### 3. Multichotomous Dummy Variables (k > 2)
+
+#### 3.1 Constructing the Dummies
+
+Education has $k = 4$ categories, so we need $4 - 1 = 3$ dummy variables. If we choose "Less than HS" as the reference group:
+
+$$\text{HS_graduate} = \begin{cases} 1 & \text{if HS graduate} \\ 0 & \text{otherwise} \end{cases}$$
+
+$$\text{Some_college} = \begin{cases} 1 & \text{if Some college} \\ 0 & \text{otherwise} \end{cases}$$
+
+$$\text{College_graduate} = \begin{cases} 1 & \text{if College graduate} \\ 0 & \text{otherwise} \end{cases}$$
+
+The data matrix looks like this:
+
+```{r}
+#| label: dummy-coding-table
+#| echo: false
+tibble(
+  Observation = 1:5,
+  Education = c("Less than HS", "HS graduate", "Some college", "College graduate", "Less than HS"),
+  HS_graduate = c(0, 1, 0, 0, 0),
+  Some_college = c(0, 0, 1, 0, 0),
+  College_graduate = c(0, 0, 0, 1, 0)
+) |>
+  kable(caption = "Dummy Variable Encoding for Education (Reference: Less than HS)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Notice that the reference group is identified by having **all dummy variables equal to zero**.
+
+#### 3.2 The Reference Group
+
+The **reference group** is the category against which all others are compared. Key points:
+
+- The choice of reference group affects the **interpretation** of coefficients but not the model's predictive ability
+- The predicted values are identical regardless of which reference group is chosen
+- Choose the reference group based on your **research question** (e.g., the most common category, the "control" condition, or the group of primary interest)
+- You can always test differences between any pair of groups, not just comparisons to the reference
+
+#### 3.3 Fitting the Model in R
+
+When we include a factor variable in `lm()`, R automatically creates the dummy variables. The first level of the factor is used as the reference group by default.
+
+```{r}
+#| label: multichotomous-model
+# Fit model with education as a factor (R creates dummies automatically)
+mod_educ <- lm(menthlth_days ~ age + sex + physhlth_days + sleep_hrs + education,
+               data = brfss_dv)
+
+tidy(mod_educ, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Model with Education Dummy Variables (Reference: Less than HS)",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r}
+#| label: extract-educ-coefs
+b_educ <- round(coef(mod_educ), 3)
+ci_educ <- round(confint(mod_educ), 3)
+p_educ <- coef(summary(mod_educ))[, "Pr(>|t|)"]  # p-values, used in the text below
+```
+
+#### 3.4 Interpreting Each Dummy Coefficient
+
+The model is:
+
+$$\widehat{\text{Mental Health Days}} = `r b_educ[1]` `r pm(b_educ[2])`(\text{Age}) `r pm(b_educ[3])`(\text{Female}) `r pm(b_educ[4])`(\text{Phys Days}) `r pm(b_educ[5])`(\text{Sleep}) `r pm(b_educ[6])`(\text{HS grad}) `r pm(b_educ[7])`(\text{Some college}) `r pm(b_educ[8])`(\text{College grad})$$
+
+Each education coefficient represents the estimated **difference** in mentally unhealthy days between that group and the reference group (Less than HS), **holding all other variables constant**:
+
+- **HS graduate ($\hat{\beta}$ = `r b_educ[6]`):** Compared to those with less than a high school education, HS graduates report an estimated `r abs(b_educ[6])` `r more_fewer(b_educ[6])` mentally unhealthy days, holding age, sex, physical health days, and sleep constant (`r sig_text(p_educ[6])`).
+
+- **Some college ($\hat{\beta}$ = `r b_educ[7]`):** Compared to those with less than a high school education, those with some college report an estimated `r abs(b_educ[7])` `r more_fewer(b_educ[7])` mentally unhealthy days, holding all else constant (`r sig_text(p_educ[7])`).
+
+- **College graduate ($\hat{\beta}$ = `r b_educ[8]`):** Compared to those with less than a high school education, college graduates report an estimated `r abs(b_educ[8])` `r more_fewer(b_educ[8])` mentally unhealthy days, holding all else constant (`r sig_text(p_educ[8])`).
+
+::: {.callout-important}
+## Key pattern
+
+All comparisons are made **relative to the reference group**. The coefficients do NOT directly tell us the difference between, say, HS graduates and college graduates. We would need to compute $\hat{\beta}_{\text{HS grad}} - \hat{\beta}_{\text{College grad}}$ for that comparison (or change the reference group).
+:::
+
+#### 3.5 Visualizing the Parallel Lines
+
+```{r}
+#| label: parallel-lines-education
+#| fig-alt: !expr local({g <- as.data.frame(pred_educ); a <- g[g$x == 20, ]; a <- a[order(-a$predicted), ]; paste0("Predicted mentally unhealthy days against age (20 to 80) for the four education levels, with 95% confidence bands. The four lines are parallel and fall with age. From highest to lowest they are ", paste(a$group, collapse = ", "), "; at age 20 they range from ", round(max(a$predicted), 1), " to ", round(min(a$predicted), 1), " days, and the bands overlap.")})
+#| fig-cap: Predicted Mental Health Days by Age and Education Level
+pred_educ <- ggpredict(mod_educ, terms = c("age [20:80]", "education"))
+
+ggplot(pred_educ, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1.1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.1, color = NA) +
+  labs(
+    title    = "Predicted Mental Health Days by Age and Education",
+    subtitle = "Parallel lines: same slopes for age, different intercepts by education",
+    x        = "Age (years)",
+    y        = "Predicted Mentally Unhealthy Days",
+    color    = "Education",
+    fill     = "Education"
+  ) +
+  theme_minimal(base_size = 13) +
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2")
+```
+
+::: {.callout-note}
+These are a series of **parallel lines**, one for each education level. The slope for age is the same across all groups; only the intercept differs. Each education dummy shifts the intercept up or down relative to the reference group.
+:::
+
+### 4. Changing the Reference Group
+
+#### 4.1 Using `relevel()` in R
+
+We may want to change the reference group to a category that is more epidemiologically meaningful. For instance, "`r names(which.max(table(brfss_dv$education)))`" is the largest group (`r format(max(table(brfss_dv$education)), big.mark = ",")` people) and could serve as a natural comparison.
+
+```{r}
+#| label: relevel-example
+# Change reference group to College graduate
+brfss_dv$education_reref <- relevel(brfss_dv$education, ref = "College graduate")
+
+mod_educ_reref <- lm(menthlth_days ~ age + sex + physhlth_days + sleep_hrs + education_reref,
+                     data = brfss_dv)
+
+tidy(mod_educ_reref, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Same Model, Different Reference Group (Reference: College graduate)",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+#### 4.2 What Changes and What Stays the Same?
+
+```{r}
+#| label: compare-ref-groups
+tribble(
+  ~Quantity, ~`Ref: Less than HS`, ~`Ref: College graduate`,
+  "Intercept", round(coef(mod_educ)[1], 3), round(coef(mod_educ_reref)[1], 3),
+  "Age coefficient", round(coef(mod_educ)[2], 3), round(coef(mod_educ_reref)[2], 3),
+  "Sex coefficient", round(coef(mod_educ)[3], 3), round(coef(mod_educ_reref)[3], 3),
+  "Physical health days", round(coef(mod_educ)[4], 3), round(coef(mod_educ_reref)[4], 3),
+  "Sleep hours", round(coef(mod_educ)[5], 3), round(coef(mod_educ_reref)[5], 3),
+  "R-squared", round(summary(mod_educ)$r.squared, 4), round(summary(mod_educ_reref)$r.squared, 4),
+  "Residual SE", round(summary(mod_educ)$sigma, 3), round(summary(mod_educ_reref)$sigma, 3)
+) |>
+  kable(caption = "Comparing Models with Different Reference Groups") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**What changes:**
+
+- The intercept
+- The education dummy variable coefficients (they now represent comparisons to the new reference group)
+
+**What stays the same:**
+
+- Coefficients for age, sex, physical health days, and sleep
+- $R^2$, Adjusted $R^2$, and Residual Standard Error
+- All predicted values
+- The overall F-test
+
+::: {.callout-note}
+## This is a critical point
+
+Changing the reference group does not change the model's fit or predictions. It only changes the **interpretation** of the dummy variable coefficients.
+:::
+
+```{r}
+#| label: verify-predictions
+# Verify that predicted values are identical
+pred_orig <- predict(mod_educ)
+pred_reref <- predict(mod_educ_reref)
+
+tibble(
+  Check = c("Maximum absolute difference in predictions",
+            "Correlation between predictions"),
+  Value = c(max(abs(pred_orig - pred_reref)),
+            cor(pred_orig, pred_reref))
+) |>
+  kable(caption = "Verification: Predicted Values Are Identical") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### 5. The Dummy Variable Trap (Perfect Multicollinearity)
+
+#### 5.1 Why We Cannot Include All k Dummies
+
+If we include $k$ dummy variables **and** an intercept for a variable with $k$ categories, the columns of the design matrix $X$ are linearly dependent. Specifically:
+
+$$\text{Intercept} = D_1 + D_2 + \cdots + D_k$$
+
+where $D_1, \ldots, D_k$ are the $k$ dummy variables (one for each category). This means the matrix $X^TX$ is singular and cannot be inverted, so the OLS estimator $\hat{\beta} = (X^TX)^{-1}X^TY$ does not exist.
+
+This is called the **dummy variable trap**.
+
+```{r}
+#| label: dummy-trap-illustration
+#| echo: false
+tibble(
+  Obs = 1:4,
+  Intercept = 1,
+  A = c(1, 0, 0, 1),
+  B = c(0, 1, 0, 0),
+  C = c(0, 0, 1, 0)
+) |>
+  mutate(`A + B + C` = A + B + C) |>
+  kable(caption = "The Dummy Variable Trap: Intercept = A + B + C (perfect linear dependence)") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(6, bold = TRUE)
+```
+
+**Solutions:**
+
+1. **Reference cell coding (default in R):** Include $k - 1$ dummies; the omitted category is absorbed into the intercept
+2. **Remove the intercept:** Fit the model with `- 1` in the formula and include all $k$ dummies. Then each coefficient is the group mean (adjusted for other predictors) rather than a difference from a reference.
+
+```{r}
+#| label: no-intercept-example
+# Model without intercept: all k dummies included
+mod_no_int <- lm(menthlth_days ~ age + sex + physhlth_days + sleep_hrs + education - 1,
+                 data = brfss_dv)
+
+tidy(mod_no_int, conf.int = TRUE) |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(
+    caption = "Model Without Intercept: All k Education Dummies Included",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-warning}
+## Caution
+
+Removing the intercept changes the interpretation of $R^2$ and should only be done when there is a substantive reason. In most epidemiological applications, reference cell coding (the default) is preferred.
+:::
+
+### 6. Testing Whether a Categorical Variable is Significant
+
+#### 6.1 The Partial F-Test (Type I and Type III)
+
+When a categorical variable with $k$ levels enters the model as $k - 1$ dummies, we cannot assess its overall significance by looking at individual t-tests for each dummy. A single dummy might not be statistically significant on its own, yet the variable as a whole might be.
+
+To test whether education as a whole is associated with the outcome, we use a **partial F-test** (also called an extra sum of squares F-test):
+
+$$H_0: \beta_{\text{HS grad}} = \beta_{\text{Some college}} = \beta_{\text{College grad}} = 0$$
+$$H_A: \text{At least one } \beta_j \neq 0$$
+
+This compares the **full model** (with education) to a **reduced model** (without education):
+
+```{r}
+#| label: partial-f-test
+# Reduced model (no education)
+mod_reduced <- lm(menthlth_days ~ age + sex + physhlth_days + sleep_hrs, data = brfss_dv)
+
+# Partial F-test
+f_test <- anova(mod_reduced, mod_educ)
+
+f_test |>
+  tidy() |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(caption = "Partial F-test: Does Education Improve the Model?") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Here F(`r f_test$Df[2]`, `r f_test$Res.Df[2]`) = `r round(f_test$F[2], 2)`, `r fmt_p(f_test[2, "Pr(>F)"])`: education as a whole `r if (f_test[2, "Pr(>F)"] < 0.05) "is" else "is not"` significantly associated with mentally unhealthy days once age, sex, physical health, and sleep are in the model.
+
+#### 6.2 Using `car::Anova()` for Type III Tests
+
+The `car::Anova()` function with `type = "III"` provides a convenient way to test the overall significance of each predictor, including categorical variables:
+
+```{r}
+#| label: type-iii-anova
+Anova(mod_educ, type = "III") |>
+  tidy() |>
+  mutate(p.value = format.pval(p.value, digits = 3, eps = 0.001),
+         across(where(is.numeric), \(x) round(x, 4))) |>
+  kable(caption = "Type III ANOVA: Testing Each Predictor's Contribution") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-note}
+## Type I vs. Type III
+
+Type I (sequential) sums of squares depend on the order variables enter the model. Type III (partial) sums of squares test each variable after all others, regardless of order. For unbalanced observational data (the norm in epidemiology), **Type III is preferred**.
+:::
+
+### 7. Contrasts and Alternative Coding Schemes
+
+#### 7.1 Reference (Treatment) Coding, the Default
+
+This is what R uses by default (`contr.treatment`). Each coefficient represents the difference between a group and the reference group.
+
+```{r}
+#| label: view-contrasts
+contrasts(brfss_dv$education)
+```
+
+#### 7.2 Effect (Deviation) Coding
+
+In **effect coding** (`contr.sum`), each coefficient represents the difference between a group's mean and the **grand mean** (the unweighted average of all group means). This is common in ANOVA contexts.
+
+```{r}
+#| label: effect-coding
+# Set effect coding
+brfss_dv$education_effect <- brfss_dv$education
+contrasts(brfss_dv$education_effect) <- contr.sum(4)
+
+mod_effect <- lm(menthlth_days ~ age + sex + physhlth_days + sleep_hrs + education_effect,
+                 data = brfss_dv)
+
+tidy(mod_effect, conf.int = TRUE) |>
+  mutate(
+    term = case_when(
+      str_detect(term, "education_effect1") ~ "Education: Less than HS vs. Grand Mean",
+      str_detect(term, "education_effect2") ~ "Education: HS graduate vs. Grand Mean",
+      str_detect(term, "education_effect3") ~ "Education: Some college vs. Grand Mean",
+      TRUE ~ term
+    ),
+    across(where(is.numeric), \(x) round(x, 4))
+  ) |>
+  kable(
+    caption = "Effect Coding: Each Education Coefficient vs. Grand Mean",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+::: {.callout-note}
+With effect coding, the **intercept** is the grand mean (adjusted for covariates), and each education coefficient shows how far that group deviates from the grand mean. The omitted group's deviation is the negative sum of the others.
+:::
+
+#### 7.3 Polynomial (Orthogonal) Contrasts for Ordinal Variables
+
+When a categorical variable is truly **ordinal** (like education), we can test for specific patterns using orthogonal polynomial contrasts (`contr.poly`). These decompose the group differences into linear, quadratic, and cubic trends.
+
+```{r}
+#| label: ordinal-contrasts
+# Ordinal polynomial contrasts
+brfss_dv$education_ord <- brfss_dv$education
+contrasts(brfss_dv$education_ord) <- contr.poly(4)
+
+mod_ord <- lm(menthlth_days ~ age + sex + physhlth_days + sleep_hrs + education_ord,
+              data = brfss_dv)
+
+tidy(mod_ord, conf.int = TRUE) |>
+  mutate(
+    term = case_when(
+      str_detect(term, "\\.L$") ~ "Education: Linear trend",
+      str_detect(term, "\\.Q$") ~ "Education: Quadratic trend",
+      str_detect(term, "\\.C$") ~ "Education: Cubic trend",
+      TRUE ~ term
+    ),
+    across(where(is.numeric), \(x) round(x, 4))
+  ) |>
+  kable(
+    caption = "Polynomial Contrasts: Testing Linear, Quadratic, and Cubic Trends",
+    col.names = c("Term", "Estimate", "SE", "t", "p-value", "CI Lower", "CI Upper")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+**Interpretation:**
+
+- The **linear** contrast tests whether there is a consistent trend (higher education = fewer/more days)
+- The **quadratic** contrast tests whether the relationship curves (U-shaped or inverted-U)
+- The **cubic** contrast tests for an S-shaped pattern
+
+```{r}
+#| label: poly-p
+#| include: false
+poly_p <- coef(summary(mod_ord))[c("education_ord.L", "education_ord.Q", "education_ord.C"), "Pr(>|t|)"]
+poly_b <- coef(mod_ord)["education_ord.L"]
+```
+
+In these data the linear trend is `r sig_text(poly_p[1])`, with a `r if (poly_b < 0) "negative" else "positive"` sign (`r if (poly_b < 0) "fewer" else "more"` mentally unhealthy days with more education); the quadratic trend is `r sig_text(poly_p[2])` and the cubic trend is `r sig_text(poly_p[3])`.
+
+::: {.callout-note}
+Polynomial contrasts are most useful when the categories have a clear, meaningful order and you want to characterize the *shape* of the trend rather than compare individual groups to a reference.
+:::
+
+#### 7.4 Coding Scheme Comparison Summary
+
+```{r}
+#| label: coding-comparison
+#| echo: false
+tibble(
+  `Coding Scheme` = c("Treatment (Reference)", "Effect (Deviation)", "Polynomial (Ordinal)"),
+  `R Function` = c("contr.treatment (default)", "contr.sum", "contr.poly"),
+  Intercept = c("Reference group mean", "Grand mean", "Grand mean"),
+  `Each β represents` = c("Difference from reference group", "Deviation from grand mean", "Linear/quadratic/cubic trend"),
+  `Best for` = c("Group comparisons to baseline", "ANOVA-style analyses", "Ordinal variables with ordered levels")
+) |>
+  kable(caption = "Summary of Dummy Variable Coding Schemes") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE) |>
+  column_spec(4, width = "25%")
+```
+
+### 8. Practical Considerations
+
+#### 8.1 Choosing the Reference Group
+
+Guidelines for choosing the reference group:
+
+1. **Most common category:** maximizes the precision of comparisons (largest reference sample)
+2. **Control or baseline condition:** natural in experimental or clinical settings
+3. **Epidemiologically meaningful comparator:** the group to which you want to compare all others
+4. **Consistency with published literature:** facilitates comparison across studies
+
+#### 8.2 When `as.factor()` Is Required
+
+If a categorical variable is stored as numeric in your data (e.g., coded 0, 1, 2, 3), R will treat it as continuous by default. You **must** use `as.factor()` or `factor()` to tell R it is categorical:
+
+```{r}
+#| label: as-factor-demo
+# WRONG: R treats educ_numeric as continuous
+mod_wrong <- lm(menthlth_days ~ educ_numeric, data = brfss_dv)
+
+# RIGHT: Convert to factor first
+mod_right <- lm(menthlth_days ~ factor(educ_numeric), data = brfss_dv)
+
+# Compare: 1 coefficient (wrong) vs. 3 coefficients (right)
+tribble(
+  ~Model, ~`Number of education coefficients`, ~`Degrees of freedom used`,
+  "Numeric (wrong)", 1, 1,
+  "Factor (correct)", 3, 3
+) |>
+  kable(caption = "Numeric vs. Factor Treatment of Categorical Variables") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+#### 8.3 Comparing Non-Reference Groups
+
+What if we want to compare HS graduates to college graduates, but neither is the reference group? We have two options:
+
+**Option 1:** Change the reference group with `relevel()`.
+
+**Option 2:** Compute the difference manually from the model output.
+
+```{r}
+#| label: compare-non-reference
+# Difference between HS graduate and College graduate
+# = β_HS_grad - β_College_grad
+diff_est <- coef(mod_educ)["educationHS graduate"] - coef(mod_educ)["educationCollege graduate"]
+
+# Use linearHypothesis() for a formal test with SE and p-value
+lin_test <- linearHypothesis(mod_educ, "educationHS graduate - educationCollege graduate = 0")
+
+cat("Estimated difference (HS grad - College grad):", round(diff_est, 3), "days\n")
+cat("F-statistic:", round(lin_test$F[2], 3), "\n")
+cat("p-value:", round(lin_test$`Pr(>F)`[2], 4), "\n")
+```
+
+::: {.callout-note}
+`car::linearHypothesis()` is a powerful function for testing any linear combination of coefficients, not just comparisons to the reference group.
+:::
+
+### Summary of Key Concepts
+
+| Concept | Key Point |
+|---------|-----------|
+| Categorical predictors | Cannot be included as raw numeric codes in regression |
+| Dummy variables | Binary (0/1) indicators; need $k - 1$ for $k$ categories |
+| Reference group | The omitted category; all comparisons are relative to it |
+| Changing reference | Use `relevel()`; predictions unchanged, interpretation changes |
+| Partial F-test | Tests whether the categorical variable as a whole is significant |
+| Dummy variable trap | Including $k$ dummies + intercept = perfect multicollinearity |
+| `as.factor()` | Required when categorical variable is stored as numeric |
+| Coding schemes | Treatment (default), effect, polynomial: each answers a different question |
+| Type III ANOVA | Preferred for unbalanced observational data |
+| Linear hypothesis | `linearHypothesis()` tests comparisons between non-reference groups |
+
+## Part 2: In-Class Lab Activity
+
+### Instructions
+
+In this lab, you will practice constructing, fitting, and interpreting regression models with dummy variables using the BRFSS 2020 analytic dataset. Work through each task systematically. You may discuss concepts with classmates, but your written answers and R code must be your own.
+
+[Download the lab template (.qmd)](../labs/templates/template-dummy-variables-lab.qmd){.btn .btn-sm .btn-outline-primary download="dummy-variables-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_Dummy_Variables_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `menthlth_days` | Mentally unhealthy days in past 30 | Continuous (0--30) |
+| `physhlth_days` | Physically unhealthy days in past 30 | Continuous (0--30) |
+| `sleep_hrs` | Sleep hours per night | Continuous (1--14) |
+| `age` | Age in years (capped at 80) | Continuous |
+| `sex` | Sex (Male/Female) | Factor |
+| `education` | Education level (4 categories) | Factor |
+| `gen_health` | General health status (5 categories) | Factor |
+| `marital_status` | Marital status (6 categories) | Factor |
+| `educ_numeric` | Education as numeric code (1--4) | Numeric |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(car)
+library(ggeffects)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "EDUCA",
+           "GENHLTH", "MARITAL")
+) |>
+  janitor::clean_names()
+
+brfss_dv <- brfss_full |>
+  mutate(
+    # Outcome: mentally unhealthy days in past 30
+    menthlth_days = case_when(
+      menthlth == 88                    ~ 0,
+      menthlth >= 1 & menthlth <= 30   ~ as.numeric(menthlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Physical health days
+    physhlth_days = case_when(
+      physhlth == 88                    ~ 0,
+      physhlth >= 1 & physhlth <= 30   ~ as.numeric(physhlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Sleep hours
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14   ~ as.numeric(sleptim1),
+      TRUE                             ~ NA_real_
+    ),
+    # Age
+    age = age80,
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Education (6-level raw BRFSS variable EDUCA)
+    # 1 = Never attended school or only kindergarten
+    # 2 = Grades 1 through 8 (Elementary)
+    # 3 = Grades 9 through 11 (Some high school)
+    # 4 = Grade 12 or GED (High school graduate)
+    # 5 = College 1 year to 3 years (Some college or technical school)
+    # 6 = College 4 years or more (College graduate)
+    # 9 = Refused
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    # General health status (5-level)
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    # Marital status
+    marital_status = factor(case_when(
+      marital == 1 ~ "Married",
+      marital == 2 ~ "Divorced",
+      marital == 3 ~ "Widowed",
+      marital == 4 ~ "Separated",
+      marital == 5 ~ "Never married",
+      marital == 6 ~ "Unmarried couple",
+      TRUE         ~ NA_character_
+    ), levels = c("Married", "Divorced", "Widowed", "Separated",
+                  "Never married", "Unmarried couple")),
+    # Store the raw education numeric code for the "naive approach" demonstration
+    educ_numeric = case_when(
+      educa %in% c(1, 2, 3) ~ 1,
+      educa == 4             ~ 2,
+      educa == 5             ~ 3,
+      educa == 6             ~ 4,
+      TRUE                   ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(menthlth_days),
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(age), age >= 18,
+    !is.na(sex),
+    !is.na(education),
+    !is.na(gen_health),
+    !is.na(marital_status)
+  )
+
+# Reproducible random sample
+set.seed(1220)
+brfss_dv <- brfss_dv |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+         education, gen_health, marital_status, educ_numeric) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Exploratory Data Analysis (15 points)
+
+**1a. (5 pts)** Create a descriptive statistics table using `tbl_summary()` that includes `menthlth_days`, `age`, `sex`, `gen_health`, and `marital_status`. Show means (SD) for continuous variables and n (%) for categorical variables.
+
+**1b. (5 pts)** Create a boxplot of `menthlth_days` by `gen_health`. Which group reports the most mentally unhealthy days? Does the pattern appear consistent with what you would expect?
+
+**1c. (5 pts)** Create a grouped bar chart or table showing the mean number of mentally unhealthy days by `marital_status`. Which marital status group has the highest mean? The lowest?
+
+### Task 2: The Naive Approach (10 points)
+
+**2a. (5 pts)** Using the `gen_health` variable, create a numeric version coded as: Excellent = 1, Very good = 2, Good = 3, Fair = 4, Poor = 5. Fit a simple regression model: `menthlth_days ~ gen_health_numeric`. Report the coefficient and interpret it.
+
+**2b. (5 pts)** Now fit the same model but treating `gen_health` as a factor: `menthlth_days ~ gen_health`. Compare the two models. Why does the factor version use 4 coefficients instead of 1? Explain why the naive numeric approach may be misleading.
+
+### Task 3: Dummy Variable Regression with General Health (25 points)
+
+**3a. (5 pts)** Fit the following model with `gen_health` as a factor:
+
+`menthlth_days ~ age + sex + physhlth_days + sleep_hrs + gen_health`
+
+Write out the fitted regression equation.
+
+**3b. (10 pts)** Interpret **every** dummy variable coefficient for `gen_health` in plain language. Be specific about the reference group, the direction and magnitude of each comparison, and include the phrase "holding all other variables constant."
+
+**3c. (10 pts)** Create a coefficient plot (forest plot) showing the estimated coefficients and 95% confidence intervals for the `gen_health` dummy variables only. Which group differs most from the reference group?
+
+### Task 4: Changing the Reference Group (15 points)
+
+**4a. (5 pts)** Use `relevel()` to change the reference group for `gen_health` to "Good." Refit the model from Task 3a.
+
+**4b. (5 pts)** Compare the coefficients for age, sex, physical health days, and sleep between the two models (original reference vs. new reference). Are they the same? Why or why not?
+
+**4c. (5 pts)** Verify that the predicted values from both models are identical by computing the correlation between the two sets of predictions. Explain in your own words why changing the reference group does not change predictions.
+
+### Task 5: Partial F-Test for General Health (20 points)
+
+**5a. (5 pts)** Fit a reduced model without `gen_health`:
+
+`menthlth_days ~ age + sex + physhlth_days + sleep_hrs`
+
+Report $R^2$ and Adjusted $R^2$ for both the reduced model and the full model (from Task 3a).
+
+**5b. (10 pts)** Conduct a partial F-test using `anova()` to test whether `gen_health` as a whole significantly improves the model. State the null and alternative hypotheses. Report the F-statistic, degrees of freedom, and p-value. State your conclusion.
+
+**5c. (5 pts)** Use `car::Anova()` with `type = "III"` on the full model. Compare the result for `gen_health` to your partial F-test. Are they consistent?
+
+### Task 6: Public Health Interpretation (15 points)
+
+**6a. (5 pts)** Using the full model from Task 3a, write a **3--4 sentence paragraph** summarizing the association between general health status and mental health days for a **non-statistical audience**. Your paragraph should:
+
+- Identify which general health groups differ most from the reference
+- State the direction and approximate magnitude of the association
+- Appropriately acknowledge the cross-sectional nature of the data
+- Not use any statistical jargon (no "significant," "coefficient," "p-value," "confidence interval")
+
+**6b. (10 pts)** Now consider both the education model (from the guided practice) and the general health model (from your lab). Discuss: Which categorical predictor appears to be more strongly associated with mental health days? How would you decide which to include if you were building a final model? Write 3--4 sentences addressing this comparison.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::
