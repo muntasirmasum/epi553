@@ -1,0 +1,298 @@
+---
+title: "Tests of Hypotheses Lab (pairs)"
+author: "Student A and Student B"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(car)
+library(gtsummary)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "INCOME2", "SEXVAR",
+           "EXERANY2", "_BMI5")
+) |>
+  janitor::clean_names()
+
+brfss_mlr <- brfss_full |>
+  mutate(
+    # Outcome: mentally unhealthy days in past 30 (88 = none = 0; 77/99 = DK/refused = NA)
+    menthlth_days = case_when(
+      menthlth == 88              ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                        ~ NA_real_
+    ),
+    # Physical health days (key predictor)
+    physhlth_days = case_when(
+      physhlth == 88              ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                        ~ NA_real_
+    ),
+    # Sleep hours (practical cap at 14)
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                        ~ NA_real_
+    ),
+    # Age (capped at 80 per BRFSS coding)
+    age = age80,
+    # Income category (ordinal 1–8)
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Exercise in past 30 days (any physical activity)
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    # BMI (stored as integer × 100 in BRFSS)
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    # Income as labeled factor (for display)
+    income_f = factor(income2, levels = 1:8,
+      labels = c("<$10k", "$10-15k", "$15-20k", "$20-25k",
+                 "$25-35k", "$35-50k", "$50-75k", ">$75k"))
+  ) |>
+  filter(
+    !is.na(menthlth_days),
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(age),   age >= 18,
+    !is.na(income_cat),
+    !is.na(sex),
+    !is.na(exercise)
+  )
+
+# ── Analytic sample (reproducible random sample) ────────────────────────────
+set.seed(553)
+brfss_mlr <- brfss_mlr |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age,
+         income_cat, income_f, sex, exercise, bmi) |>
+  slice_sample(n = 5000)
+```
+
+## Round 1: Student A Drives, Student B Navigates
+
+## Task 1: Fitting Models and ANOVA Tables (15 points)
+
+**1a. (5 pts)** Fit the following model:
+
+$$\text{menthlth\_days} = \beta_0 + \beta_1 \cdot \text{physhlth\_days} + \beta_2 \cdot \text{sleep\_hrs} + \beta_3 \cdot \text{age} + \varepsilon$$
+
+Use `tidy()` with `conf.int = TRUE` to display the coefficients. Report the fitted equation with rounded coefficients.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Use `anova()` on this model to obtain the Type I (sequential) sums of squares. Present the ANOVA table and verify that the sum of all predictor Type I SS equals the model SSR. Show this calculation explicitly.
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Use `car::Anova()` with `type = "III"` on the same model to obtain the Type III sums of squares. Compare the Type I and Type III SS for each variable. Which variable's SS is the same in both tables? Why?
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: Type I vs. Type III Sums of Squares (15 points)
+
+**2a. (5 pts)** Fit the same model from Task 1 but **reverse the variable order**:
+
+$$\text{menthlth\_days} = \beta_0 + \beta_1 \cdot \text{age} + \beta_2 \cdot \text{sleep\_hrs} + \beta_3 \cdot \text{physhlth\_days} + \varepsilon$$
+
+Run `anova()` on this model and compare the Type I SS to what you obtained in Task 1b. Which values changed and which stayed the same?
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Run `car::Anova(type = "III")` on this reordered model. Did the Type III SS change compared to Task 1c? Explain why or why not.
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** In 2–3 sentences, explain when an epidemiologist should prefer Type III SS over Type I SS. Give a concrete example from public health research where the choice matters.
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+## Task 3: Partial F-Tests for Individual Variables (20 points)
+
+**3a. (10 pts)** Conduct a partial F-test to determine whether `age` adds significantly to the prediction of mental health days, given that `physhlth_days` and `sleep_hrs` are already in the model. Do this by:
+
+1. Fitting a **reduced model** (without `age`)
+2. Fitting the **full model** (with `age`)
+3. Using `anova(reduced, full)` to compare them
+
+State the null hypothesis, report the F-statistic and p-value, and state your conclusion at $\alpha = 0.05$.
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (10 pts)** Now verify your result from 3a manually. Using the `anova()` output from the full model (Task 1b), identify $SS(\text{age} \mid \text{physhlth\_days}, \text{sleep\_hrs})$ from the Type I table. Compute the F-statistic as:
+
+$$F = \frac{SS(\text{age} \mid \text{physhlth\_days}, \text{sleep\_hrs}) / 1}{MSE(\text{full model})}$$
+
+Compare to the critical value $F_{1, n-p-1, 0.95}$. Does your manual calculation agree with the `anova()` comparison from 3a?
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+## Round 2: Student B Drives, Student A Navigates
+
+**Switch roles now.**
+
+## Task 4: T-Tests and the F-Test Equivalence (15 points)
+
+**4a. (5 pts)** Using the full model from Task 1 (`menthlth_days ~ physhlth_days + sleep_hrs + age`), run `summary()` and extract the t-statistics and p-values for each coefficient.
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (5 pts)** For each predictor, compute $t^2$ and compare it to the Type III F-statistic from Task 1c. Create a table showing the t-statistic, $t^2$, the Type III F-statistic, and both p-values. Are they equivalent?
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** In your own words, explain why the t-test and the Type III partial F-test give the same result. What is the fundamental relationship between the t-distribution and the F-distribution that makes this true?
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+## Task 5: Chunk Test, Testing Groups of Variables (20 points)
+
+**5a. (10 pts)** Now consider the full 6-predictor model:
+
+$$\text{menthlth\_days} = \beta_0 + \beta_1 \cdot \text{physhlth\_days} + \beta_2 \cdot \text{sleep\_hrs} + \beta_3 \cdot \text{age} + \beta_4 \cdot \text{income\_cat} + \beta_5 \cdot \text{sex} + \beta_6 \cdot \text{exercise} + \varepsilon$$
+
+Test whether `income_cat`, `sex`, and `exercise`, as a group, significantly add to the prediction of mental health days, given that `physhlth_days`, `sleep_hrs`, and `age` are already in the model.
+
+State the null hypothesis (in both words and mathematical notation), conduct the test, and state your conclusion.
+
+```{r}
+#| label: task-5a
+
+```
+
+*Your answer:*
+
+**5b. (5 pts)** Compute the chunk test F-statistic manually using:
+
+$$F = \frac{\{SSR(\text{full}) - SSR(\text{reduced})\} / (df_{\text{full}} - df_{\text{reduced}})}{MSE(\text{full})}$$
+
+Show all intermediate values. Does your manual computation match the `anova()` result?
+
+```{r}
+#| label: task-5b
+
+```
+
+*Your answer:*
+
+**5c. (5 pts)** Note that `exercise` was **not** individually significant in the Type III table, yet it is part of a group that *is* collectively significant. In 2–3 sentences, explain how this is possible and what it means for model building in epidemiology.
+
+```{r}
+#| label: task-5c
+
+```
+
+*Your answer:*
+
+## Task 6: Synthesis and Interpretation (15 points)
+
+**6a. (5 pts)** Based on the full model, which predictors are statistically significant at $\alpha = 0.05$? List them and briefly state the direction of each association (positive or negative).
+
+```{r}
+#| label: task-6a
+
+```
+
+*Your answer:*
+
+**6b. (5 pts)** A colleague argues: "We should drop `exercise` from the model because it's not significant." Do you agree? Write a 2–3 sentence response explaining your reasoning. Consider the chunk test results and epidemiologic rationale.
+
+```{r}
+#| label: task-6b
+
+```
+
+*Your answer:*
+
+**6c. (5 pts)** Write a 3–4 sentence summary of the hypothesis testing results for a non-statistical audience (e.g., a public health program manager). Your summary should convey which factors were identified as independently associated with mental health days and which were not, without using jargon like "p-value," "F-test," or "sums of squares."
+
+```{r}
+#| label: task-6c
+
+```
+
+*Your answer:*
+
+## Task 7: Reflection (Not Graded, strongly recommended)
+
+In 2–3 sentences, reflect on working with a partner in this lab. What did you find helpful about the Driver-Navigator approach? How did it affect your understanding of the material?
+
+```{r}
+#| label: task-7
+
+```
+
+*Your answer:*

@@ -1,0 +1,189 @@
+---
+title: "Simple Linear Regression Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_lab <- read_brfss(
+  2020,
+  vars = c("_BMI5", "_AGE80", "_SEX", "_EDUCAG", "GENHLTH", "PHYSHLTH", "SLEPTIM1")
+) |>
+  janitor::clean_names() |>
+  mutate(
+    bmi       = bmi5 / 100,
+    age       = age80,
+    sex       = factor(ifelse(sex == 1, "Male", "Female")),
+    education = factor(case_when(
+      educag == 1 ~ "< High school",
+      educag == 2 ~ "High school graduate",
+      educag == 3 ~ "Some college",
+      educag == 4 ~ "College graduate"
+    ), levels = c("< High school", "High school graduate",
+                  "Some college", "College graduate")),
+    gen_health_num = ifelse(genhlth  %in% 1:5,  genhlth,  NA_real_),
+    sleep_hrs      = ifelse(sleptim1 %in% 1:24, sleptim1, NA_real_),
+    phys_days      = ifelse(physhlth %in% 0:30, physhlth, NA_real_)
+  )
+
+# Draw the same sample as the lecture, then keep the lab variables
+set.seed(553)
+brfss_lab <- brfss_lab |>
+  select(bmi, age, sex, education, gen_health_num, sleep_hrs, phys_days) |>
+  filter(bmi > 14.5, bmi < 60, age >= 18, age <= 80) |>
+  drop_na() |>
+  slice_sample(n = 3000) |>
+  select(bmi, age, sex, phys_days, sleep_hrs)
+```
+
+## Task 1: Explore the Variables (15 points)
+
+```{r}
+#| label: lab-task1
+# (a) Create a summary table of phys_days and bmi
+
+# (b) Create a histogram of phys_days, then describe the distribution
+
+# (c) Create a scatter plot of phys_days (Y) vs bmi (X)
+
+```
+
+**Questions:**
+
+a) What is the mean and standard deviation of `phys_days`? Of `bmi`? What do you notice about the distribution of `phys_days`?
+
+b) Based on the scatter plot, does the relationship between BMI and poor physical health days appear to be linear? Are there any obvious outliers?
+
+*Your answer:*
+
+## Task 2: Fit and Interpret the SLR Model (20 points)
+
+```{r}
+#| label: lab-task2
+# (a) Fit the SLR model: phys_days ~ bmi
+
+# (b) Display a tidy coefficient table with 95% CIs
+
+# (c) Extract and report: slope, intercept, t-statistic, p-value
+
+```
+
+**Questions:**
+
+a) Write the fitted regression equation in the form $\hat{Y} = b_0 + b_1 X$.
+
+b) Interpret the **slope** ($b_1$) in context. What does it mean in plain English?
+
+c) Is the intercept ($b_0$) interpretable in this context? Why or why not?
+
+d) Is the association statistically significant at $\alpha = 0.05$? State the null hypothesis, test statistic, and p-value.
+
+*Your answer:*
+
+## Task 3: ANOVA Decomposition and R² (15 points)
+
+```{r}
+#| label: lab-task3
+# (a) Display the ANOVA table
+
+# (b) Compute and report SSTotal, SSRegression, and SSResidual
+
+# (c) Compute R² two ways: from the model object and from the SS decomposition
+
+```
+
+**Questions:**
+
+a) Fill in the ANOVA table components: $SS_{Total}$, $SS_{Regression}$, $SS_{Residual}$, $df$, and $F$-statistic.
+
+b) What is the $R^2$ value? Interpret it in plain English.
+
+c) What does this $R^2$ tell you about how well BMI alone explains variation in poor physical health days? What might explain the remaining variation?
+
+*Your answer:*
+
+## Task 4: Confidence and Prediction Intervals (20 points)
+
+```{r}
+#| label: lab-task4
+# (a) Calculate the fitted value and 95% CI for a person with BMI = 25
+
+# (b) Calculate the 95% prediction interval for a person with BMI = 25
+
+# (c) Plot the regression line with both the CI band and PI band
+
+```
+
+**Questions:**
+
+a) For someone with a BMI of 25, what is the estimated **mean** number of poor physical health days? What is the 95% confidence interval for this mean?
+
+b) If a **specific new person** has a BMI of 25, what is the 95% prediction interval for their number of poor physical health days?
+
+c) Explain in your own words why the prediction interval is wider than the confidence interval. When would you use each one in practice?
+
+*Your answer:*
+
+## Task 5: Residual Diagnostics (20 points)
+
+```{r}
+#| label: lab-task5
+# (a) Produce the four standard diagnostic plots (use par(mfrow = c(2,2)) and plot())
+
+# (b) Create a residuals vs. fitted plot using ggplot
+
+# (c) Create a normal Q-Q plot of residuals using ggplot
+
+# (d) Create a Cook's distance plot
+
+```
+
+**Questions:**
+
+a) Examine the **Residuals vs. Fitted** plot. Is there evidence of nonlinearity or heteroscedasticity? Describe what you see.
+
+b) Examine the **Q-Q plot**. Are the residuals approximately normal? What do departures from normality in this context suggest about the distribution of `phys_days`?
+
+c) Are there any influential observations (Cook's D > 4/n)? How many? What would you do about them?
+
+d) Overall, do the LINE assumptions appear to be met? Which assumption(s) may be most problematic for this model, and why? *(Hint: think about the nature of the outcome variable.)*
+
+*Your answer:*
+
+## Task 6: Testing a Different Predictor (10 points)
+
+Now fit a second SLR model using **age** as the predictor of `phys_days` instead of BMI.
+
+```{r}
+#| label: lab-task6
+# (a) Fit SLR: phys_days ~ age
+
+# (b) Display results and compare to the BMI model
+
+# (c) Which predictor has the stronger association? Compare R² values.
+
+```
+
+**Questions:**
+
+a) How does the association between age and poor physical health days compare to the BMI association in terms of direction, magnitude, and statistical significance?
+
+b) Compare the $R^2$ values of the two models. Which predictor explains more variability in `phys_days`?
+
+c) Based on these two simple models, what is your overall conclusion about predictors of poor physical health days? What are the limitations of using simple linear regression for this outcome?
+
+*Your answer:*

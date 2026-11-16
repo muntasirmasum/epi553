@@ -1,0 +1,285 @@
+---
+title: "Dummy Variables Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(car)
+library(ggeffects)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "EDUCA",
+           "GENHLTH", "MARITAL")
+) |>
+  janitor::clean_names()
+
+brfss_dv <- brfss_full |>
+  mutate(
+    # Outcome: mentally unhealthy days in past 30
+    menthlth_days = case_when(
+      menthlth == 88                    ~ 0,
+      menthlth >= 1 & menthlth <= 30   ~ as.numeric(menthlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Physical health days
+    physhlth_days = case_when(
+      physhlth == 88                    ~ 0,
+      physhlth >= 1 & physhlth <= 30   ~ as.numeric(physhlth),
+      TRUE                             ~ NA_real_
+    ),
+    # Sleep hours
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14   ~ as.numeric(sleptim1),
+      TRUE                             ~ NA_real_
+    ),
+    # Age
+    age = age80,
+    # Sex
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    # Education (6-level raw BRFSS variable EDUCA)
+    # 1 = Never attended school or only kindergarten
+    # 2 = Grades 1 through 8 (Elementary)
+    # 3 = Grades 9 through 11 (Some high school)
+    # 4 = Grade 12 or GED (High school graduate)
+    # 5 = College 1 year to 3 years (Some college or technical school)
+    # 6 = College 4 years or more (College graduate)
+    # 9 = Refused
+    education = factor(case_when(
+      educa %in% c(1, 2, 3) ~ "Less than HS",
+      educa == 4             ~ "HS graduate",
+      educa == 5             ~ "Some college",
+      educa == 6             ~ "College graduate",
+      TRUE                   ~ NA_character_
+    ), levels = c("Less than HS", "HS graduate", "Some college", "College graduate")),
+    # General health status (5-level)
+    gen_health = factor(case_when(
+      genhlth == 1 ~ "Excellent",
+      genhlth == 2 ~ "Very good",
+      genhlth == 3 ~ "Good",
+      genhlth == 4 ~ "Fair",
+      genhlth == 5 ~ "Poor",
+      TRUE         ~ NA_character_
+    ), levels = c("Excellent", "Very good", "Good", "Fair", "Poor")),
+    # Marital status
+    marital_status = factor(case_when(
+      marital == 1 ~ "Married",
+      marital == 2 ~ "Divorced",
+      marital == 3 ~ "Widowed",
+      marital == 4 ~ "Separated",
+      marital == 5 ~ "Never married",
+      marital == 6 ~ "Unmarried couple",
+      TRUE         ~ NA_character_
+    ), levels = c("Married", "Divorced", "Widowed", "Separated",
+                  "Never married", "Unmarried couple")),
+    # Store the raw education numeric code for the "naive approach" demonstration
+    educ_numeric = case_when(
+      educa %in% c(1, 2, 3) ~ 1,
+      educa == 4             ~ 2,
+      educa == 5             ~ 3,
+      educa == 6             ~ 4,
+      TRUE                   ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(menthlth_days),
+    !is.na(physhlth_days),
+    !is.na(sleep_hrs),
+    !is.na(age), age >= 18,
+    !is.na(sex),
+    !is.na(education),
+    !is.na(gen_health),
+    !is.na(marital_status)
+  )
+
+# Reproducible random sample
+set.seed(1220)
+brfss_dv <- brfss_dv |>
+  select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+         education, gen_health, marital_status, educ_numeric) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Exploratory Data Analysis (15 points)
+
+**1a. (5 pts)** Create a descriptive statistics table using `tbl_summary()` that includes `menthlth_days`, `age`, `sex`, `gen_health`, and `marital_status`. Show means (SD) for continuous variables and n (%) for categorical variables.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Create a boxplot of `menthlth_days` by `gen_health`. Which group reports the most mentally unhealthy days? Does the pattern appear consistent with what you would expect?
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Create a grouped bar chart or table showing the mean number of mentally unhealthy days by `marital_status`. Which marital status group has the highest mean? The lowest?
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: The Naive Approach (10 points)
+
+**2a. (5 pts)** Using the `gen_health` variable, create a numeric version coded as: Excellent = 1, Very good = 2, Good = 3, Fair = 4, Poor = 5. Fit a simple regression model: `menthlth_days ~ gen_health_numeric`. Report the coefficient and interpret it.
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Now fit the same model but treating `gen_health` as a factor: `menthlth_days ~ gen_health`. Compare the two models. Why does the factor version use 4 coefficients instead of 1? Explain why the naive numeric approach may be misleading.
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+## Task 3: Dummy Variable Regression with General Health (25 points)
+
+**3a. (5 pts)** Fit the following model with `gen_health` as a factor:
+
+`menthlth_days ~ age + sex + physhlth_days + sleep_hrs + gen_health`
+
+Write out the fitted regression equation.
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (10 pts)** Interpret **every** dummy variable coefficient for `gen_health` in plain language. Be specific about the reference group, the direction and magnitude of each comparison, and include the phrase "holding all other variables constant."
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (10 pts)** Create a coefficient plot (forest plot) showing the estimated coefficients and 95% confidence intervals for the `gen_health` dummy variables only. Which group differs most from the reference group?
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+## Task 4: Changing the Reference Group (15 points)
+
+**4a. (5 pts)** Use `relevel()` to change the reference group for `gen_health` to "Good." Refit the model from Task 3a.
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (5 pts)** Compare the coefficients for age, sex, physical health days, and sleep between the two models (original reference vs. new reference). Are they the same? Why or why not?
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** Verify that the predicted values from both models are identical by computing the correlation between the two sets of predictions. Explain in your own words why changing the reference group does not change predictions.
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+## Task 5: Partial F-Test for General Health (20 points)
+
+**5a. (5 pts)** Fit a reduced model without `gen_health`:
+
+`menthlth_days ~ age + sex + physhlth_days + sleep_hrs`
+
+Report $R^2$ and Adjusted $R^2$ for both the reduced model and the full model (from Task 3a).
+
+```{r}
+#| label: task-5a
+
+```
+
+*Your answer:*
+
+**5b. (10 pts)** Conduct a partial F-test using `anova()` to test whether `gen_health` as a whole significantly improves the model. State the null and alternative hypotheses. Report the F-statistic, degrees of freedom, and p-value. State your conclusion.
+
+```{r}
+#| label: task-5b
+
+```
+
+*Your answer:*
+
+**5c. (5 pts)** Use `car::Anova()` with `type = "III"` on the full model. Compare the result for `gen_health` to your partial F-test. Are they consistent?
+
+```{r}
+#| label: task-5c
+
+```
+
+*Your answer:*
+
+## Task 6: Public Health Interpretation (15 points)
+
+**6a. (5 pts)** Using the full model from Task 3a, write a **3--4 sentence paragraph** summarizing the association between general health status and mental health days for a **non-statistical audience**. Your paragraph should:
+
+- Identify which general health groups differ most from the reference
+- State the direction and approximate magnitude of the association
+- Appropriately acknowledge the cross-sectional nature of the data
+- Not use any statistical jargon (no "significant," "coefficient," "p-value," "confidence interval")
+
+```{r}
+#| label: task-6a
+
+```
+
+*Your answer:*
+
+**6b. (10 pts)** Now consider both the education model (from the guided practice) and the general health model (from your lab). Discuss: Which categorical predictor appears to be more strongly associated with mental health days? How would you decide which to include if you were building a final model? Write 3--4 sentences addressing this comparison.
+
+```{r}
+#| label: task-6b
+
+```
+
+*Your answer:*

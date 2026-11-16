@@ -1,0 +1,253 @@
+---
+title: "Regression Diagnostics Lab (optional practice)"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(car)
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2")
+) |>
+  janitor::clean_names()
+
+brfss_dx <- brfss_full |>
+  mutate(
+    # Outcome
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    )
+  ) |>
+  filter(
+    !is.na(menthlth_days), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat)
+  )
+
+set.seed(1220)
+brfss_dx <- brfss_dx |>
+  dplyr::select(menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Fit a Model and Check Assumptions (20 points)
+
+**1a. (5 pts)** Fit the model: `menthlth_days ~ physhlth_days + sleep_hrs + age + sex + exercise + income_cat`. Report the model coefficients, $R^2$, and Adjusted $R^2$.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Create a residuals vs. fitted values plot using jackknife residuals. Include a loess smoothing line. Does the linearity assumption appear to hold? What about homoscedasticity?
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Create a normal Q-Q plot of the jackknife residuals. Does the normality assumption hold? Describe the specific pattern you observe (e.g., right skew, heavy tails, etc.).
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+**1d. (5 pts)** Run the Breusch-Pagan test for heteroscedasticity using `car::ncvTest()`. Report the test statistic and p-value. Given the large sample size, how should you weigh the formal test result against the visual evidence from your residual plot?
+
+```{r}
+#| label: task-1d
+
+```
+
+*Your answer:*
+
+## Task 2: Transformations (15 points)
+
+**2a. (5 pts)** Based on your diagnostic plots in Task 1, apply an appropriate transformation to the outcome variable (e.g., $\log(Y+1)$ or $\sqrt{Y}$). Refit the model and create a new Q-Q plot. Did the transformation improve normality?
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Create residuals vs. fitted plots for both the original and transformed models side by side. Compare the patterns.
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** In 2--3 sentences, explain how the transformation changes the interpretation of the regression coefficients. Is the trade-off worth it?
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+## Task 3: Outlier Detection (25 points)
+
+**3a. (5 pts)** Compute jackknife residuals for the original (untransformed) model. What are the minimum and maximum jackknife residuals? How many observations have $|r_{(-i)}| > 3$?
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (10 pts)** Perform a formal Bonferroni-corrected outlier test. Calculate the critical value manually using `qt()` and then verify using `car::outlierTest()`. Are any observations statistically significant outliers?
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (5 pts)** For the top 5 observations with the largest absolute jackknife residuals, examine their predictor values. Is there anything unusual about these observations? Create a table showing their values.
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+**3d. (5 pts)** In 2--3 sentences, explain why it is important to use the Bonferroni correction when testing multiple residuals for outlier status.
+
+```{r}
+#| label: task-3d
+
+```
+
+*Your answer:*
+
+## Task 4: Leverage and Influence (25 points)
+
+**4a. (5 pts)** Compute the leverage ($h_i$) for all observations. Report the average leverage. How many observations exceed the $3\bar{h}$ threshold?
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (5 pts)** Compute Cook's distance for all observations. Using the $4/n$ threshold, how many observations are potentially influential?
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** Create a scatterplot of jackknife residuals vs. leverage with point size proportional to Cook's distance. Identify any observations that are both high-leverage and have large residuals.
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+**4d. (5 pts)** Refit the model after removing all observations with Cook's distance $> 4/n$. Compare the coefficients with the full-data model in a single table. Do any coefficients change substantially?
+
+```{r}
+#| label: task-4d
+
+```
+
+*Your answer:*
+
+**4e. (5 pts)** A colleague argues: "We should just remove all outliers and high-leverage points to get a cleaner model." Write a 3--4 sentence response explaining why this approach is problematic.
+
+```{r}
+#| label: task-4e
+
+```
+
+*Your answer:*
+
+## Task 5: Multicollinearity Assessment (15 points)
+
+**5a. (5 pts)** Compute the VIF for all predictors in your model. Present the results in a table with VIF, tolerance, and a flag column. Is there evidence of multicollinearity?
+
+```{r}
+#| label: task-5a
+
+```
+
+*Your answer:*
+
+**5b. (5 pts)** Create a pairwise correlation matrix for the continuous predictors. Which pair has the strongest correlation?
+
+```{r}
+#| label: task-5b
+
+```
+
+*Your answer:*
+
+**5c. (5 pts)** Suppose you wanted to add a quadratic term for BMI to the model ($\text{bmi}^2$). Compute the VIF for `bmi` and `bmi_sq` in this expanded model. Then center BMI and recompute. Show that centering reduces the VIF. Why does centering help?
+
+```{r}
+#| label: task-5c
+
+```
+
+*Your answer:*

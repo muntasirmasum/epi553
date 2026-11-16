@@ -23,7 +23,13 @@
       "/lectures/anova.html",
       "/lectures/matrix-algebra.html",
       "/lectures/statistical-modeling.html",
-      "/lectures/simple-linear-regression.html"
+      "/lectures/simple-linear-regression.html",
+      "/lectures/multiple-linear-regression.html",
+      "/lectures/hypothesis-tests.html",
+      "/lectures/dummy-variables.html",
+      "/lectures/confounding-interaction.html",
+      "/lectures/model-selection.html",
+      "/lectures/diagnostics.html"
     ]
   }
 ]
