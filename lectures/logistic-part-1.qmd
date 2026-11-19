@@ -1,0 +1,943 @@
+---
+title: "Logistic Regression, Part 1"
+subtitle: "Model a binary outcome with odds, odds ratios, and the logit link."
+description: "Odds and odds ratios, the logistic function and the logit link, simple and multiple logistic regression with glm(), and crude versus adjusted odds ratios, using frequent mental distress in BRFSS 2020."
+order: 12
+unit: "Logistic regression"
+categories: [Logistic regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+f1 <- function(x) formatC(x, format = "f", digits = 1)
+f2 <- function(x) formatC(x, format = "f", digits = 2)
+# Odds ratio and profile 95% CI for one term, as in the tables
+or_row <- function(model, term) {
+  broom::tidy(model, exponentiate = TRUE, conf.int = TRUE) |>
+    dplyr::filter(.data$term == .env$term)
+}
+or_text <- function(model, term) {
+  r <- or_row(model, term)
+  paste0(f2(r$estimate), " (95% CI ", f2(r$conf.low), " to ", f2(r$conf.high), ")")
+}
+# "30% lower" or "60% higher" odds
+odds_change <- function(or) paste0(round(abs(or - 1) * 100), "% ", if (or < 1) "lower" else "higher")
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- explain why linear regression is a poor model for a binary outcome;
+- move between probabilities, odds, and log-odds, and read the logistic curve;
+- fit simple logistic regression models with `glm()` and turn their coefficients into odds ratios;
+- rescale the odds ratio for a continuous predictor (for example, per 10 years of age);
+- fit a multiple logistic regression model and compare crude and adjusted odds ratios.
+:::
+
+## Introduction
+
+Throughout this course, we have modeled **continuous** outcomes: mentally unhealthy days, blood pressure, BMI. But many outcomes in epidemiology are **binary**: disease or no disease, survived or died, exposed or unexposed. Linear regression is not appropriate for binary outcomes because it can produce predicted probabilities outside the [0, 1] range and violates the assumptions of normally distributed residuals with constant variance.
+
+**Logistic regression** is the standard method for modeling binary outcomes. It is arguably the most widely used regression technique in epidemiologic research. In this lecture, we will:
+
+1. Understand **why** linear regression fails for binary outcomes
+2. Learn the **logistic model** and the logit transformation
+3. Connect logistic regression to the **odds ratio**, the primary measure of effect in epidemiology
+4. Fit and interpret a **simple logistic regression** model in R
+5. Extend to **multiple logistic regression** (introduced today, continued next lecture)
+
+**Textbook reference:** Kleinbaum et al., Chapter 22 (Sections 22.1 through 22.3)
+
+## Why/When/Watch-out
+
+### Why use logistic regression?
+
+- The outcome variable is **binary** (0/1, yes/no, disease/no disease)
+- We want to estimate the **probability** of an event occurring
+- We need **adjusted odds ratios** that control for confounders
+- We want to identify **risk factors** for a dichotomous health outcome
+
+### When to use it?
+
+- Cross-sectional studies: prevalence of a condition
+- Case-control studies: odds of exposure given disease status
+- Cohort studies: incidence of disease (when outcome is rare, OR approximates RR)
+
+### Watch out for:
+
+- **Separation**: when a predictor perfectly predicts the outcome, ML estimation fails
+- **Small sample sizes**: logistic regression needs roughly 10-20 events per predictor
+- **Multicollinearity**: same issues as in linear regression
+- **Linearity in the logit**: the relationship between continuous predictors and the log-odds must be linear
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(ggeffects)
+library(plotly)
+```
+
+### The BRFSS 2020 Dataset
+
+We continue using the **Behavioral Risk Factor Surveillance System (BRFSS) 2020**. In previous lectures, we modeled **mentally unhealthy days** as a continuous outcome. Today, we transform this into a **binary outcome**: **frequent mental distress** (FMD), defined as reporting 14 or more mentally unhealthy days in the past 30 days. This threshold is used by the CDC as a standard measure of frequent mental distress.
+
+**Research question:**
+
+> *What individual, behavioral, and socioeconomic factors are associated with frequent mental distress among U.S. adults?*
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode the variables, keep adults with complete data, and draw a random sample of 5,000.
+
+Install the packages once with `install.packages(c("brfssdata", "janitor"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the ten BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+```
+
+The question about current smoking (`SMOKDAY2`) is asked only of people who have smoked at least 100 cigarettes in their life (`SMOKE100`). People who never reached 100 cigarettes are coded as former/never smokers rather than dropped.
+
+```{r}
+#| label: prepare-data
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+
+tibble(Metric = c("Observations", "Variables", "FMD Cases", "FMD Prevalence"),
+       Value  = c(nrow(brfss_logistic), ncol(brfss_logistic),
+                  sum(brfss_logistic$fmd == "Yes"),
+                  paste0(round(100 * mean(brfss_logistic$fmd == "Yes"), 1), "%"))) |>
+  kable(caption = "Analytic Dataset Overview") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Descriptive Overview
+
+```{r}
+#| label: descriptives
+brfss_logistic |>
+  tbl_summary(
+    by = fmd,
+    include = c(physhlth_days, sleep_hrs, age, sex, bmi, exercise,
+                income_cat, smoker),
+    type = list(
+      c(physhlth_days, sleep_hrs, age, bmi, income_cat) ~ "continuous"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})"
+    ),
+    label = list(
+      physhlth_days ~ "Physical unhealthy days",
+      sleep_hrs     ~ "Sleep hours",
+      age           ~ "Age (years)",
+      sex           ~ "Sex",
+      bmi           ~ "BMI",
+      exercise      ~ "Exercise in past 30 days",
+      income_cat    ~ "Income category (1-8)",
+      smoker        ~ "Smoking status"
+    )
+  ) |>
+  add_overall() |>
+  add_p(test = all_continuous() ~ "t.test") |>
+  bold_labels() |>
+  as_kable_extra(escape = TRUE)
+```
+
+```{r}
+#| label: descriptive-directions
+#| include: false
+# Group means used in the sentence below
+by_fmd <- brfss_logistic |>
+  summarise(
+    phys = mean(physhlth_days), sleep = mean(sleep_hrs), age = mean(age),
+    female = 100 * mean(sex == "Female"), pct_exercise = 100 * mean(exercise == "Yes"),
+    income = mean(income_cat), current = 100 * mean(smoker == "Current"),
+    .by = fmd
+  )
+g_yes <- by_fmd[by_fmd$fmd == "Yes", ]
+g_no  <- by_fmd[by_fmd$fmd == "No", ]
+cmp <- function(v, hi, lo) if (g_yes[[v]] > g_no[[v]]) hi else lo
+```
+
+**Interpretation:** This table compares characteristics between those with and without frequent mental distress. Compared with the other adults, individuals with FMD report `r cmp("phys", "more", "fewer")` physically unhealthy days (mean `r f1(g_yes$phys)` vs. `r f1(g_no$phys)`), sleep `r cmp("sleep", "more", "less")` (`r f1(g_yes$sleep)` vs. `r f1(g_no$sleep)` hours), are `r cmp("age", "older", "younger")` on average (`r f1(g_yes$age)` vs. `r f1(g_no$age)` years), are `r cmp("female", "more", "less")` likely to be female (`r round(g_yes$female)`% vs. `r round(g_no$female)`%), are `r cmp("pct_exercise", "more", "less")` likely to exercise (`r round(g_yes$pct_exercise)`% vs. `r round(g_no$pct_exercise)`%), have `r cmp("income", "higher", "lower")` income, and are `r cmp("current", "more", "less")` likely to be current smokers (`r round(g_yes$current)`% vs. `r round(g_no$current)`%). These differences motivate our regression analysis to identify independent risk factors.
+
+## Part 1: Why Linear Regression Fails for Binary Outcomes
+
+### The Problem
+
+What happens if we try to use linear regression for a binary outcome? Let us fit a linear probability model and see.
+
+#### Real-Life Examples
+
+Before seeing this in our BRFSS data, consider two familiar clinical scenarios where the breakdown of linear regression is obvious.
+
+**Example 1: Predicting Diabetes Diagnosis from Fasting Blood Glucose**
+
+A clinician wants to predict whether a patient has diabetes (1 = yes, 0 = no) based on fasting blood glucose (mg/dL). After fitting a linear regression on a sample of patients, the model produces:
+
+- A 25-year-old with a fasting glucose of 60 mg/dL: $\hat{P}(\text{diabetes}) = -0.08$, a *negative* probability.
+- An elderly patient with a glucose of 380 mg/dL: $\hat{P}(\text{diabetes}) = 1.21$, a probability *above 1*.
+
+Neither prediction is mathematically interpretable as a probability. The model is extrapolating beyond [0, 1] because a straight line has no natural ceiling or floor. In reality, the risk of diabetes rises steeply at high glucose levels but levels off, exactly the behavior the S-shaped logistic curve captures.
+
+**Example 2: Predicting 30-Day Hospital Readmission**
+
+A hospital administrator fits a linear regression to predict 30-day readmission (1 = readmitted, 0 = not) using age and number of comorbidities. For extreme cases:
+
+- A healthy 22-year-old with no comorbidities: $\hat{P}(\text{readmission}) = -0.15$ (impossible)
+- An 85-year-old with eight comorbidities: $\hat{P}(\text{readmission}) = 1.09$ (impossible)
+
+Beyond the out-of-bounds predictions, the model also violates homoscedasticity. Because $Y$ can only be 0 or 1, the variance of the residuals is $p(1-p)$, which depends on the fitted value and changes across the range of the predictor. Standard errors, confidence intervals, and hypothesis tests all rest on the assumption of constant variance, so they are invalid here.
+
+These are not edge cases: they arise routinely whenever you apply linear regression to a binary outcome. The solution is to model the **log-odds** of the event, which is what logistic regression does.
+
+```{r}
+#| label: linear-prob-model
+#| fig-alt: "Scatter plot of frequent mental distress (jittered 0 or 1) against age, 18 to 80, with points in two horizontal bands at 0 and 1. A red straight line (linear regression) and a black dashed curve (logistic regression) both fall gently from about 21% at age 18 to about 8% at age 80 and nearly overlap; neither leaves the 0 to 1 range."
+# Create numeric version of outcome
+brfss_logistic <- brfss_logistic |>
+  mutate(fmd_num = as.numeric(fmd == "Yes"))
+
+# Fit linear regression on binary outcome
+lpm <- lm(fmd_num ~ age, data = brfss_logistic)
+
+ggplot(brfss_logistic, aes(x = age, y = fmd_num)) +
+  geom_jitter(alpha = 0.1, height = 0.05, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 1.2) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"),
+              se = FALSE, color = "black", linetype = "dashed", linewidth = 1.2) +
+  labs(title = "Linear vs. Logistic Fit for a Binary Outcome",
+       subtitle = "Red solid line = linear regression, black dashed line = logistic regression",
+       x = "Age (years)", y = "Frequent Mental Distress (0/1)") +
+  scale_y_continuous(breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  theme_minimal()
+```
+
+**Three problems with using linear regression for binary outcomes:**
+
+1. **Predicted values outside [0, 1]:** The linear model can predict probabilities below 0 or above 1, which is nonsensical for a probability.
+
+2. **Non-constant variance:** For a binary outcome, the variance of Y at a given X value is $p(1-p)$, which depends on the predicted probability. This violates the homoscedasticity assumption.
+
+3. **Non-normal residuals:** The residuals can only take two values at any given X, so they cannot be normally distributed.
+
+```{r}
+#| label: lpm-range
+#| include: false
+lpm_ends <- predict(lpm, newdata = tibble(age = c(18, 80)))
+```
+
+In this sample the straight line runs from `r f1(100 * lpm_ends[1])`% at age 18 to `r f1(100 * lpm_ends[2])`% at age 80, `r if (all(lpm_ends > 0 & lpm_ends < 1)) "so it stays inside [0, 1], and the logistic curve lies almost on top of it: problem 1 shows up only with stronger predictors or more extreme values, as in the two examples above. Problems 2 and 3 are present whenever the outcome is binary." else "so it already leaves [0, 1] within the observed ages."`
+
+The logistic model solves all three problems by modeling the **log-odds** of the outcome rather than the outcome itself.
+
+## Part 2: The Logistic Model
+
+### The Logistic Function
+
+The logistic model describes the probability of the outcome ($Y = 1$) as a function of predictors using the **logistic function**:
+
+$$\Pr(Y = 1) = \frac{1}{1 + e^{-(\beta_0 + \beta_1 X_1 + \cdots + \beta_k X_k)}}$$
+
+This function has a characteristic **S-shape** (sigmoid curve) that is bounded between 0 and 1, making it ideal for modeling probabilities.
+
+```{r}
+#| label: logistic-curve
+# Fit a simple logistic model using sleep hours to anchor the real-life annotations
+mod_sleep_demo <- glm(fmd_num ~ sleep_hrs, data = brfss_logistic,
+                      family = binomial(link = "logit"))
+b0 <- coef(mod_sleep_demo)[1]
+b1 <- coef(mod_sleep_demo)[2]
+
+# Real-life anchor points: translate specific sleep-hour values into z and P(FMD)
+anchors <- tibble(
+  sleep  = c(3, 5, 7, 8, 10),
+  label  = paste0(c(3, 5, 7, 8, 10), " hrs sleep")
+) |>
+  mutate(
+    z    = b0 + b1 * sleep,
+    prob = plogis(z),
+    hover_text = paste0(
+      "<b>", label, "</b><br>",
+      "z (log-odds): ", round(z, 2), "<br>",
+      "P(FMD): ", round(prob * 100, 1), "%"
+    )
+  )
+
+# Logistic curve data
+curve_df <- tibble(z = seq(-6, 6, by = 0.05)) |>
+  mutate(prob = plogis(z))
+
+plot_ly() |>
+  # S-shaped logistic curve
+  add_trace(
+    data       = curve_df,
+    x          = ~z, y = ~prob,
+    type       = "scatter", mode = "lines",
+    line       = list(color = "steelblue", width = 3),
+    name       = "Logistic function",
+    hoverinfo  = "skip"
+  ) |>
+  # Reference lines at y = 0, 0.5, 1 and x = 0
+  add_segments(x = -6, xend = 6, y = 0.5, yend = 0.5,
+               line = list(dash = "dash", color = "grey60", width = 1),
+               showlegend = FALSE, hoverinfo = "skip") |>
+  add_segments(x = 0, xend = 0, y = 0, yend = 1,
+               line = list(dash = "dash", color = "grey60", width = 1),
+               showlegend = FALSE, hoverinfo = "skip") |>
+  # Anchor points from the real BRFSS sleep-hours model
+  add_trace(
+    data       = anchors,
+    x          = ~z, y = ~prob,
+    type       = "scatter", mode = "markers",
+    marker     = list(size = 14, color = "darkorange",
+                      line = list(color = "white", width = 1.5)),
+    text       = ~hover_text,
+    hoverinfo  = "text",
+    name       = "BRFSS: sleep hrs → P(FMD)"
+  ) |>
+  layout(
+    title = list(
+      text = "<b>The Logistic Function</b><br><sup>f(z) = 1 / (1 + e<sup>−z</sup>)   |   Real-life example: sleep hours predicting P(frequent mental distress)</sup>",
+      x    = 0.5
+    ),
+    xaxis = list(
+      title      = "z  =  β₀ + β₁·X₁ + ··· + βₖ·Xₖ  (linear predictor / log-odds)",
+      zeroline   = FALSE,
+      range      = c(-6, 6)
+    ),
+    yaxis = list(
+      title      = "Pr(FMD = 1)",
+      tickformat = ".0%",
+      range      = c(0, 1)
+    ),
+    legend = list(orientation = "h", y = -0.18),
+    hovermode  = "closest",
+    annotations = list(
+      list(x = -3.5, y = 0.22,
+           text = "⟵  More sleep<br>(lower risk)",
+           showarrow = FALSE,
+           font = list(size = 12, color = "grey40")),
+      list(x = 3.5, y = 0.78,
+           text = "Less sleep<br>(higher risk)  ⟶",
+           showarrow = FALSE,
+           font = list(size = 12, color = "grey40"))
+    )
+  )
+```
+
+[Figure description: interactive line chart of the logistic function, with the probability of FMD (0 to 100%) on the y-axis and the linear predictor z from -6 to 6 on the x-axis. The S-shaped curve passes 50% at z = 0, marked by dashed reference lines. Five orange dots show the model's predictions for 3, 5, 7, 8, and 10 hours of sleep, from z = `r f2(anchors$z[1])` and `r f1(100 * anchors$prob[1])`% at 3 hours to z = `r f2(anchors$z[5])` and `r f1(100 * anchors$prob[5])`% at 10 hours, all on the lower left part of the curve.]{.visually-hidden}
+
+::: {.callout-note}
+## How to read this chart
+
+Each orange dot is a real person-type from our BRFSS data. The x-axis shows their value of the linear predictor $z = \hat{\beta}_0 + \hat{\beta}_1 \times \text{sleep\_hrs}$, a single number that summarises all predictor information. The S-curve then converts $z$ into a probability bounded between 0 and 1. Hover over the dots to see exactly how many sleep hours map to which log-odds and predicted probability.
+
+FMD is uncommon (`r round(100 * mean(brfss_logistic$fmd == "Yes"))`% of the sample), so `r if (all(anchors$z < 0)) "every dot sits left of $z = 0$, on the lower half of the curve" else "the dots straddle $z = 0$"`: $z$ runs from `r f2(anchors$z[anchors$sleep == 3])` at 3 hours of sleep to `r f2(anchors$z[anchors$sleep == 10])` at 10 hours. `r if (b1 < 0) "More sleep moves a person further left, toward the flat lower tail, where the curve keeps flattening. Each extra hour still lowers the predicted probability, but by less" else "More sleep moves a person to the right, up the curve"`: going from 3 to 5 hours `r if (b1 < 0) "lowers" else "raises"` it by `r f1(100 * abs(diff(anchors$prob[anchors$sleep %in% c(3, 5)])))` percentage points, and going from 8 to 10 hours by `r f1(100 * abs(diff(anchors$prob[anchors$sleep %in% c(8, 10)])))`. On the probability scale the logistic function shows diminishing returns, even though each hour changes the log-odds by the same amount.
+:::
+
+**Key properties of the logistic function:**
+
+- As $z \to -\infty$, $\Pr(Y=1) \to 0$
+- As $z \to +\infty$, $\Pr(Y=1) \to 1$
+- When $z = 0$, $\Pr(Y=1) = 0.5$
+- The function is steepest around $z = 0$
+
+### The Logit Transformation
+
+The **logit** is the natural log of the odds:
+
+$$\text{logit}[\Pr(Y = 1)] = \ln\left(\frac{\Pr(Y=1)}{1 - \Pr(Y=1)}\right) = \beta_0 + \beta_1 X_1 + \cdots + \beta_k X_k$$
+
+This is called the **logit form** of the model. The key insight: while the relationship between $X$ and $\Pr(Y=1)$ is non-linear (S-shaped), the relationship between $X$ and the **log-odds** is linear. This is the sense in which logistic regression is a linear model: it is linear on the log-odds scale. (The name comes from the logistic function, and the coefficients are estimated by maximum likelihood, not least squares.)
+
+| Scale | Formula | Range | Interpretation |
+|-------|---------|-------|----------------|
+| Probability | $\Pr(Y=1)$ | [0, 1] | Chance of the event |
+| Odds | $\frac{\Pr(Y=1)}{1-\Pr(Y=1)}$ | [0, $\infty$) | How much more likely than not |
+| Log-odds (logit) | $\ln\left(\frac{\Pr(Y=1)}{1-\Pr(Y=1)}\right)$ | ($-\infty$, $\infty$) | Linear in predictors |
+
+## Part 3: Odds and Odds Ratios
+
+### What Are Odds?
+
+The **odds** of an event is the ratio of the probability that the event occurs to the probability that it does not:
+
+$$\text{Odds}(D) = \frac{\Pr(D)}{1 - \Pr(D)}$$
+
+For example, if $\Pr(D) = 0.20$ (20% chance of disease):
+
+$$\text{Odds}(D) = \frac{0.20}{0.80} = 0.25$$
+
+This means the event is one-quarter as likely to happen as not happen, or equivalently, the odds are "4 to 1 against."
+
+```{r}
+#| label: odds-illustration
+#| fig-alt: "Two line charts side by side, each against the probability of the event from 0 to 1. Left, log-odds: an S-shaped curve rising from about -4.6 at probability 0.01 through 0 at probability 0.5 to about 4.6 at 0.99. Right, odds: a curve that stays near 0 for most of the range, equals 1 at probability 0.5, and shoots up to 99 as the probability approaches 1."
+tibble(Probability = seq(0.01, 0.99, by = 0.01)) |>
+  mutate(Odds = Probability / (1 - Probability),
+         `Log-Odds` = log(Odds)) |>
+  pivot_longer(-Probability, names_to = "Scale", values_to = "Value") |>
+  ggplot(aes(x = Probability, y = Value, color = Scale)) +
+  geom_line(linewidth = 1.2) +
+  facet_wrap(~Scale, scales = "free_y") +
+  labs(title = "Probability, Odds, and Log-Odds",
+       x = "Probability of Event") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### The Odds Ratio
+
+The **odds ratio** (OR) compares the odds of an event between two groups:
+
+$$\text{OR} = \frac{\text{Odds in Group A}}{\text{Odds in Group B}}$$
+
+**Interpreting the odds ratio:**
+
+| OR Value | Interpretation |
+|----------|---------------|
+| OR = 1 | No association |
+| OR > 1 | Higher odds in group A (risk factor) |
+| OR < 1 | Lower odds in group A (protective factor) |
+
+### Connecting OR to Logistic Regression
+
+For a **binary predictor** $X$ (coded 0/1), the logistic model gives:
+
+- Log-odds when $X = 1$: $\beta_0 + \beta_1$
+- Log-odds when $X = 0$: $\beta_0$
+- Difference in log-odds: $\beta_1$
+
+Therefore:
+
+$$\text{OR} = e^{\beta_1}$$
+
+**This is the fundamental result:** exponentiating the logistic regression coefficient gives the odds ratio. This works because the $\beta_0$ terms cancel when we take the ratio of odds.
+
+For a **continuous predictor**, $e^{\beta_1}$ gives the OR for a **one-unit increase** in $X$. For a $c$-unit increase:
+
+$$\text{OR}_{c\text{-unit}} = e^{c \cdot \beta_1}$$
+
+## Part 4: Simple Logistic Regression in R
+
+### Fitting the Model with `glm()`
+
+In R, logistic regression is fit using `glm()` with `family = binomial(link = "logit")`.
+
+#### Example 1: Binary predictor (exercise)
+
+```{r}
+#| label: simple-logistic-binary
+mod_exercise <- glm(fmd ~ exercise, data = brfss_logistic,
+                    family = binomial(link = "logit"))
+
+tidy(mod_exercise, conf.int = TRUE, exponentiate = FALSE) |>
+  kable(digits = 3, caption = "Simple Logistic Regression: FMD ~ Exercise (Log-Odds Scale)") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Reading the output:**
+
+- The **intercept** ($\hat{\beta}_0$) is the log-odds of FMD when exercise = "No" (the reference level)
+- The **slope** ($\hat{\beta}_1$) is the difference in log-odds between exercisers and non-exercisers
+- The **p-value** tests $H_0: \beta_1 = 0$ (i.e., OR = 1, no association)
+
+#### Converting to Odds Ratios
+
+To get odds ratios, we exponentiate the coefficients:
+
+```{r}
+#| label: or-exercise
+tidy(mod_exercise, conf.int = TRUE, exponentiate = TRUE) |>
+  kable(digits = 3,
+        caption = "Simple Logistic Regression: FMD ~ Exercise (Odds Ratio Scale)") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The odds ratio for exercise tells us how the odds of frequent mental distress compare between those who exercise and those who do not, without adjusting for any other variables. Here the OR is `r or_text(mod_exercise, "exerciseYes")`: adults who exercised in the past 30 days have `r odds_change(or_row(mod_exercise, "exerciseYes")$estimate)` odds of FMD than those who did not.
+
+#### Using `gtsummary` for Publication-Ready Tables
+
+```{r}
+#| label: gtsummary-exercise
+mod_exercise |>
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(exercise ~ "Exercise in past 30 days")
+  ) |>
+  bold_labels() |>
+  bold_p() |>
+  as_kable_extra(escape = TRUE)
+```
+
+#### Example 2: Continuous predictor (age)
+
+```{r}
+#| label: simple-logistic-continuous
+mod_age <- glm(fmd ~ age, data = brfss_logistic,
+               family = binomial(link = "logit"))
+
+tidy(mod_age, conf.int = TRUE, exponentiate = TRUE) |>
+  kable(digits = 3,
+        caption = "Simple Logistic Regression: FMD ~ Age (Odds Ratio Scale)") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The OR for age represents the change in odds of FMD for each **one-year** increase in age. A one-year change is rarely meaningful. Let us compute the OR for a **10-year** increase:
+
+```{r}
+#| label: or-age-10year
+beta_age <- coef(mod_age)["age"]
+or_10yr <- exp(10 * beta_age)
+ci_10yr <- exp(10 * confint(mod_age)["age", ])
+
+tibble(
+  `Age Difference` = "10 years",
+  `OR` = round(or_10yr, 3),
+  `95% CI Lower` = round(ci_10yr[1], 3),
+  `95% CI Upper` = round(ci_10yr[2], 3)
+) |>
+  kable(caption = "Odds Ratio for 10-Year Increase in Age") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The OR for a 10-year increase in age tells us how the odds of frequent mental distress change when comparing two individuals who differ by 10 years of age. Here it is `r f2(or_10yr)` (95% CI `r f2(ci_10yr[1])` to `r f2(ci_10yr[2])`): a person 10 years older has `r odds_change(or_10yr)` odds of FMD.
+
+#### Visualizing the Predicted Probabilities
+
+```{r}
+#| label: predicted-probs-age
+#| fig-alt: "Line chart of the predicted probability of frequent mental distress against age, 18 to 80, from the age-only logistic model. The line falls steadily from about 22% at age 18 to about 8% at age 80, with a grey 95% confidence band that is widest at the youngest ages."
+ggpredict(mod_age, terms = "age [18:80]") |>
+  plot() +
+  labs(title = "Predicted Probability of Frequent Mental Distress by Age",
+       x = "Age (years)", y = "Predicted Probability of FMD") +
+  theme_minimal()
+```
+
+```{r}
+#| label: age-ends
+#| include: false
+age_ends <- predict(mod_age, newdata = tibble(age = c(18, 80)), type = "response")
+```
+
+**Interpretation:** The curve shows the predicted probability of frequent mental distress (FMD) across ages 18 to 80 from the age-only model, so there are no other variables to hold constant. The predicted probability `r if (age_ends[2] < age_ends[1]) "falls" else "rises"` from `r f1(100 * age_ends[1])`% at age 18 to `r f1(100 * age_ends[2])`% at age 80. Over this range we see only one stretch of the S-shaped logistic curve, its lower part, so the line looks gently curved rather than S-shaped: logistic probabilities are bounded between 0 and 1 and change most steeply near 50%, which no age reaches here. The shaded band represents the 95% confidence interval around the predicted probability at each age. Pay attention to both the direction of the trend and how wide the confidence band is, especially at the extremes of age where data may be sparse.
+
+#### Example 3: Binary predictor (smoking)
+
+```{r}
+#| label: simple-logistic-smoker
+mod_smoker <- glm(fmd ~ smoker, data = brfss_logistic,
+                  family = binomial(link = "logit"))
+
+tidy(mod_smoker, conf.int = TRUE, exponentiate = TRUE) |>
+  kable(digits = 3,
+        caption = "Simple Logistic Regression: FMD ~ Smoking (Odds Ratio Scale)") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The OR for current smokers vs. former or never smokers, `r or_text(mod_smoker, "smokerCurrent")`, gives the unadjusted association between smoking and frequent mental distress: current smokers have `r odds_change(or_row(mod_smoker, "smokerCurrent")$estimate)` odds of FMD. However, this crude OR may be confounded by other factors (such as age, income, or exercise). We need **multiple logistic regression** to obtain adjusted estimates.
+
+## Part 5: Multiple Logistic Regression (Introduction)
+
+### The Adjusted Odds Ratio
+
+Just as in multiple linear regression, we can include several predictors in a logistic model to obtain **adjusted** estimates:
+
+$$\text{logit}[\Pr(\text{FMD} = 1)] = \beta_0 + \beta_1(\text{exercise}) + \beta_2(\text{age}) + \beta_3(\text{sex}) + \beta_4(\text{smoker}) + \beta_5(\text{sleep}) + \beta_6(\text{income})$$
+
+In this model, $e^{\beta_1}$ gives the **adjusted odds ratio** for exercise, controlling for age, sex, smoking status, sleep hours, and income. This is the logistic regression analog of the adjusted coefficient in multiple linear regression.
+
+```{r}
+#| label: multiple-logistic
+mod_multi <- glm(fmd ~ exercise + age + sex + smoker + sleep_hrs + income_cat,
+                 data = brfss_logistic,
+                 family = binomial(link = "logit"))
+
+mod_multi |>
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      exercise   ~ "Exercise (past 30 days)",
+      age        ~ "Age (per year)",
+      sex        ~ "Sex",
+      smoker     ~ "Smoking status",
+      sleep_hrs  ~ "Sleep hours (per hour)",
+      income_cat ~ "Income category (per unit)"
+    )
+  ) |>
+  bold_labels() |>
+  bold_p() |>
+  as_kable_extra(escape = TRUE)
+```
+
+**Interpretation:** Each odds ratio in this table is **adjusted** for all other variables in the model. Compare these adjusted ORs to the crude (unadjusted) ORs from the simple models. If they differ substantially, confounding is present. We will explore this more thoroughly next lecture.
+
+### Crude vs. Adjusted Comparison
+
+```{r}
+#| label: crude-vs-adjusted
+# Crude ORs from simple models
+crude_exercise <- tidy(mod_exercise, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(term == "exerciseYes") |>
+  dplyr::select(term, estimate, conf.low, conf.high) |>
+  mutate(type = "Crude")
+
+crude_smoker <- tidy(mod_smoker, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(term == "smokerCurrent") |>
+  dplyr::select(term, estimate, conf.low, conf.high) |>
+  mutate(type = "Crude")
+
+# Adjusted ORs from multiple model
+adj_exercise <- tidy(mod_multi, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(term == "exerciseYes") |>
+  dplyr::select(term, estimate, conf.low, conf.high) |>
+  mutate(type = "Adjusted")
+
+adj_smoker <- tidy(mod_multi, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(term == "smokerCurrent") |>
+  dplyr::select(term, estimate, conf.low, conf.high) |>
+  mutate(type = "Adjusted")
+
+bind_rows(crude_exercise, adj_exercise, crude_smoker, adj_smoker) |>
+  mutate(across(c(estimate, conf.low, conf.high), \(x) round(x, 3))) |>
+  kable(col.names = c("Predictor", "OR", "95% CI Lower", "95% CI Upper", "Type"),
+        caption = "Crude vs. Adjusted Odds Ratios") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: crude-adjusted-text
+#| include: false
+toward <- function(crude, adj) {
+  if (sign(log(adj)) != sign(log(crude))) "across 1"
+  else if (abs(log(adj)) < abs(log(crude))) "toward 1"
+  else "away from 1"
+}
+# size of the change, as in the 10% rule
+pct_chg <- function(crude, adj) paste0(f1(100 * abs(adj - crude) / crude), "%")
+tw_e <- toward(crude_exercise$estimate, adj_exercise$estimate)
+tw_s <- toward(crude_smoker$estimate, adj_smoker$estimate)
+```
+
+::: {.callout-tip}
+## Interpretation
+
+Compare the crude and adjusted ORs for exercise and smoking. If the adjusted OR moves toward 1 (attenuates), confounding was inflating the crude association. If the adjusted OR moves away from 1, confounding was masking the true association. This comparison is fundamental to epidemiologic analysis.
+
+Here the exercise OR moves from `r f2(crude_exercise$estimate)` (crude) to `r f2(adj_exercise$estimate)` (adjusted), `r tw_e` (a change of `r pct_chg(crude_exercise$estimate, adj_exercise$estimate)`), and the smoking OR moves from `r f2(crude_smoker$estimate)` to `r f2(adj_smoker$estimate)`, `r tw_s` (a change of `r pct_chg(crude_smoker$estimate, adj_smoker$estimate)`). `r if (tw_e == "toward 1" && tw_s == "toward 1") "For both predictors, part of the crude association was explained by the other variables in the model." else if (tw_e == "away from 1" && tw_s == "away from 1") "For both predictors, the other variables were masking part of the association." else "The two predictors moved differently relative to 1."`
+:::
+
+## Part 6: Model Assessment (Preview)
+
+We will cover model assessment in detail next lecture, but here is a preview of the tools available:
+
+### Overall Model Significance
+
+The **likelihood ratio test** compares the fitted model to the null (intercept-only) model:
+
+```{r}
+#| label: overall-test
+null_mod <- glm(fmd ~ 1, data = brfss_logistic, family = binomial)
+
+# Likelihood ratio test
+lr_test <- anova(null_mod, mod_multi, test = "Chisq")
+
+lr_test |>
+  kable(digits = 3, caption = "Likelihood Ratio Test: Full Model vs. Null") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+The likelihood ratio statistic is `r f1(lr_test$Deviance[2])` on `r lr_test$Df[2]` degrees of freedom (`r fmt_p(lr_test[["Pr(>Chi)"]][2])`), so the six predictors together `r if (lr_test[["Pr(>Chi)"]][2] < 0.05) "fit the data significantly better than" else "do not significantly improve on"` the intercept-only model.
+
+### Model Fit Statistics
+
+```{r}
+#| label: fit-stats
+glance(mod_multi) |>
+  dplyr::select(null.deviance, deviance, AIC, BIC, nobs) |>
+  kable(digits = 1, caption = "Model Fit Statistics") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Key metrics (covered in detail next lecture):**
+
+- **Deviance**: analogous to RSS in linear regression; lower is better
+- **AIC/BIC**: for model comparison; lower is better
+- **Hosmer-Lemeshow test**: goodness-of-fit test (next lecture)
+- **ROC curve and AUC**: discrimination ability (next lecture)
+
+## Summary
+
+| Concept | Key Point |
+|---------|-----------|
+| **Why logistic regression** | Binary outcomes need a model that constrains predictions to [0, 1] |
+| **The logistic model** | $\Pr(Y=1) = \frac{1}{1 + e^{-(\beta_0 + \beta_1 X_1 + \cdots)}}$ |
+| **The logit** | $\text{logit}[\Pr(Y=1)] = \beta_0 + \beta_1 X_1 + \cdots$ (linear in predictors) |
+| **Odds ratio** | $\text{OR} = e^{\beta}$ for one-unit change; $e^{c \cdot \beta}$ for $c$-unit change |
+| **Binary predictor** | OR compares the two categories directly |
+| **Continuous predictor** | OR is per one-unit increase; scale appropriately |
+| **Adjusted OR** | Include multiple predictors to control for confounding |
+| **In R** | `glm(y ~ x, family = binomial)` |
+| **Exponentiate** | `tidy(model, exponentiate = TRUE)` or `exp(coef(model))` |
+
+### Next Lecture
+
+- Multiple logistic regression in depth
+- Wald test vs. likelihood ratio test
+- Confidence intervals for adjusted ORs
+- Hosmer-Lemeshow goodness-of-fit test
+- ROC curves and AUC
+- Interaction terms in logistic regression
+
+## References
+
+- Kleinbaum, D. G., Kupper, L. L., Nizam, A., & Rosenberg, E. S. (2013). *Applied Regression Analysis and Other Multivariable Methods* (5th ed.), Chapter 22.
+- Hosmer, D. W., Lemeshow, S., & Sturdivant, R. X. (2013). *Applied Logistic Regression* (3rd ed.). Wiley.
+- CDC. Frequent Mental Distress definition: 14+ mentally unhealthy days in past 30 days.
+
+## Part 7: In-Class Lab Activity
+
+### Instructions
+
+Complete the four tasks below using the BRFSS 2020 sample from this lecture. You may collaborate, but each student must submit their own work.
+
+[Download the lab template (.qmd)](../labs/templates/template-logistic-part-1-lab.qmd){.btn .btn-sm .btn-outline-primary download="logistic-part-1-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_Logistic_Part1_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `fmd` | Frequent mental distress (No/Yes) | Factor (outcome) |
+| `menthlth_days` | Mentally unhealthy days (0-30) | Numeric |
+| `physhlth_days` | Physically unhealthy days (0-30) | Numeric |
+| `sleep_hrs` | Hours of sleep per night | Numeric |
+| `age` | Age in years | Numeric |
+| `sex` | Male / Female | Factor |
+| `bmi` | Body mass index | Numeric |
+| `exercise` | Exercised in past 30 days (No/Yes) | Factor |
+| `income_cat` | Household income category (1-8) | Numeric |
+| `smoker` | Former/Never vs. Current | Factor |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(ggeffects)
+
+options(gtsummary.use_ftExtra = TRUE)
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Explore the Binary Outcome (15 points)
+
+**1a. (5 pts)** Create a frequency table showing the number and percentage of individuals with and without frequent mental distress.
+
+**1b. (5 pts)** Create a descriptive summary table of at least 4 predictors, stratified by FMD status. Use `tbl_summary()`.
+
+**1c. (5 pts)** Create a bar chart showing the proportion of FMD by exercise status OR smoking status.
+
+### Task 2: Simple Logistic Regression (20 points)
+
+**2a. (5 pts)** Fit a simple logistic regression model predicting FMD from **exercise**. Report the coefficients on the log-odds scale.
+
+**2b. (5 pts)** Exponentiate the coefficients to obtain odds ratios with 95% confidence intervals.
+
+**2c. (5 pts)** Interpret the odds ratio for exercise in the context of the research question.
+
+**2d. (5 pts)** Create a plot showing the predicted probability of FMD across levels of a continuous predictor (e.g., age or sleep hours).
+
+### Task 3: Comparing Predictors (20 points)
+
+**3a. (5 pts)** Fit three separate simple logistic regression models, each with a different predictor of your choice.
+
+**3b. (10 pts)** Create a table comparing the odds ratios from all three models.
+
+**3c. (5 pts)** Which predictor has the strongest crude association with FMD? Justify your answer.
+
+### Task 4: Introduction to Multiple Logistic Regression (20 points)
+
+**4a. (5 pts)** Fit a multiple logistic regression model predicting FMD from at least 3 predictors.
+
+**4b. (5 pts)** Report the adjusted odds ratios using `tbl_regression()`.
+
+**4c. (5 pts)** For one predictor, compare the crude OR (from Task 3) with the adjusted OR (from Task 4). Show both values.
+
+**4d. (5 pts)** In 2-3 sentences, assess whether confounding is present for the predictor you chose. Which direction did the OR change, and what does this mean?
+
+**Completion credit (25 points):** Awarded for a complete, good-faith attempt at all tasks. Total: 75 + 25 = 100 points.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

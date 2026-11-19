@@ -40,6 +40,9 @@ def main(src, dst, title, author="Your Name"):
     end_marks = [e for e in end_marks if e > 0]
     end = min(end_marks) if end_marks else len(s)
     tasks = s[start:end].strip().splitlines()
+    # A grading note such as "**Completion credit ...**" goes after the last answer block
+    credit = [l for l in tasks if l.startswith("**Completion credit")]
+    tasks = [l for l in tasks if not l.startswith("**Completion credit")]
 
     out, n_task, open_label, block_start = [], 0, None, 0
 
@@ -77,6 +80,7 @@ def main(src, dst, title, author="Your Name"):
     if open_label:
         close(open_label)
 
+    out.extend([""] + credit)
     body = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip() + "\n"
     header = f'''---
 title: "{title}"

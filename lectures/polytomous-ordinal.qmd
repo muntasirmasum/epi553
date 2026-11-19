@@ -1,0 +1,700 @@
+---
+title: "Polytomous and Ordinal Logistic Regression"
+subtitle: "Model an outcome with more than two categories, unordered or ordered."
+description: "Multinomial logistic regression with nnet::multinom(), proportional odds models with MASS::polr(), checking proportional odds with cut-point models and the Brant test, and comparing the two models, using self-rated general health in BRFSS 2020."
+order: 14
+unit: "Logistic regression"
+categories: [Logistic regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+f1 <- function(x) formatC(x, format = "f", digits = 1)
+f2 <- function(x) formatC(x, format = "f", digits = 2)
+# Odds ratio and profile 95% CI for one term, as in the tables
+or_row <- function(model, term) {
+  broom::tidy(model, exponentiate = TRUE, conf.int = TRUE) |>
+    dplyr::filter(.data$term == .env$term)
+}
+or_text <- function(model, term) {
+  r <- or_row(model, term)
+  paste0(f2(r$estimate), " (95% CI ", f2(r$conf.low), " to ", f2(r$conf.high), ")")
+}
+# "30% lower" or "60% higher" odds
+odds_change <- function(or) paste0(round(abs(or - 1) * 100), "% ", if (or < 1) "lower" else "higher")
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- explain why separate binary models are a poor substitute for one model of a multi-category outcome;
+- fit a multinomial (polytomous) logistic regression with `nnet::multinom()` and interpret relative risk ratios;
+- fit a proportional odds model with `MASS::polr()` and interpret cumulative odds ratios;
+- check the proportional odds assumption with cut-point models and the Brant test;
+- choose between the multinomial and ordinal models using the assumption check and AIC.
+:::
+
+## Introduction
+
+Binary logistic regression handles **two-category** outcomes. But many epidemiologic outcomes have **more than two categories**:
+
+- General health: Excellent / Very Good / Good / Fair / Poor
+- Disease stage: I / II / III / IV
+- Treatment choice: Drug A / Drug B / Drug C / No treatment
+- BMI category: Underweight / Normal / Overweight / Obese
+
+When the response variable has $K > 2$ categories, we use **polytomous logistic regression** (also called **multinomial logistic regression**). When the categories have a **natural order**, we can take advantage of that ordering with **ordinal logistic regression**.
+
+::: {.callout-note}
+## Today's roadmap (Kleinbaum Ch. 23)
+
+1. Polytomous (multinomial) logistic regression for nominal outcomes
+2. Ordinal logistic regression for ordered outcomes
+3. The proportional odds assumption
+4. Choosing between models
+:::
+
+## Why Not Just Run Multiple Binary Models?
+
+Suppose general health has 3 categories: **Excellent**, **Good**, **Poor**. A naive approach would be to dichotomize and run a binary logistic regression repeatedly:
+
+- Excellent vs. not
+- Good vs. not
+- Poor vs. not
+
+**Problems with this approach:**
+
+1. **Information loss.** Dichotomizing throws away the distinction between the other categories.
+2. **Inconsistent samples.** Each model uses a different comparison group.
+3. **No coherent probability model.** Predicted probabilities won't sum to 1.
+4. **Inefficiency.** Standard errors are larger than necessary.
+
+A polytomous model fits all categories **simultaneously** in a single likelihood, sharing information across comparisons.
+
+## Setup and Data
+
+```{r}
+#| label: libraries
+library(MASS)        # polr(); load before tidyverse so dplyr's select() is not masked
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(nnet)        # multinom() for polytomous regression
+library(brant)       # Brant test for proportional odds
+library(ggeffects)
+```
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. We then recode the variables, keep adults with complete data, and draw a random sample of 5,000.
+
+Install the packages this lecture adds once with `install.packages(c("brfssdata", "janitor", "brant"))`; `nnet` and `MASS` come with R.
+:::
+
+```{r}
+#| label: load-data
+# Read the eight BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("GENHLTH", "_AGE80", "SEXVAR", "_BMI5", "EXERANY2", "INCOME2",
+           "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+```
+
+### Building the Outcome: General Health
+
+The BRFSS variable `genhlth` asks: *"Would you say that in general your health is..."*
+
+1 = Excellent, 2 = Very Good, 3 = Good, 4 = Fair, 5 = Poor
+
+We collapse this into a 3-level ordinal outcome to keep models tractable for class. The question about current smoking (`SMOKDAY2`) is asked only of people who have smoked at least 100 cigarettes in their life (`SMOKE100`). People who never reached 100 cigarettes are coded as former/never smokers rather than dropped.
+
+```{r}
+#| label: prepare-data
+brfss_poly <- brfss_full |>
+  mutate(
+    # 3-level ordinal outcome
+    genhlth_3 = case_when(
+      genhlth %in% c(1, 2) ~ "Excellent/VG",
+      genhlth == 3         ~ "Good",
+      genhlth %in% c(4, 5) ~ "Fair/Poor",
+      TRUE                 ~ NA_character_
+    ),
+    # Ordered factor for ordinal regression
+    genhlth_ord = factor(genhlth_3,
+      levels = c("Excellent/VG", "Good", "Fair/Poor"),
+      ordered = TRUE),
+    # Unordered factor for polytomous regression
+    genhlth_nom = factor(genhlth_3,
+      levels = c("Excellent/VG", "Good", "Fair/Poor")),
+    # Predictors
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(genhlth_ord), !is.na(age), age >= 18, !is.na(sex),
+    !is.na(bmi), !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_poly <- brfss_poly |>
+  dplyr::select(genhlth_ord, genhlth_nom, age, sex, bmi,
+                exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+
+brfss_poly |>
+  count(genhlth_ord) |>
+  mutate(pct = round(100 * n / sum(n), 1)) |>
+  kable(col.names = c("General Health", "N", "%"),
+        caption = "Outcome Distribution") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+`genhlth_ord` and `genhlth_nom` hold the same three levels, coded once as an **ordered** factor (for the ordinal model, `polr()`) and once as an **unordered** factor (for the multinomial model, `multinom()`), so the table above describes both.
+
+## Part 1: Polytomous (Multinomial) Logistic Regression
+
+### The Model
+
+For an outcome with $K$ categories, we choose one as the **reference** (say, $Y = 1$) and fit $K - 1$ logit equations:
+
+$$
+\log\left[\frac{\Pr(Y = k)}{\Pr(Y = 1)}\right] = \alpha_k + \beta_{k1} X_1 + \cdots + \beta_{kp} X_p, \quad k = 2, \ldots, K
+$$
+
+Each comparison gets its **own intercept and its own slopes**. With 3 outcome categories and 6 predictors, that's $2 \times (1 + 6) = 14$ parameters.
+
+The probabilities are recovered as:
+
+$$
+\Pr(Y = k \mid X) = \frac{\exp(\alpha_k + X^T \beta_k)}{1 + \sum_{j=2}^{K} \exp(\alpha_j + X^T \beta_j)}
+$$
+
+for $k = 2, \ldots, K$, and $\Pr(Y = 1 \mid X) = 1 \big/ \left[1 + \sum_{j=2}^{K} \exp(\alpha_j + X^T \beta_j)\right]$ for the reference category. By construction, the probabilities sum to 1.
+
+### Fitting in R: `nnet::multinom()`
+
+```{r}
+#| label: multinom-fit
+mod_multi <- multinom(
+  genhlth_nom ~ age + sex + bmi + exercise + income_cat + smoker,
+  data = brfss_poly,
+  trace = FALSE
+)
+
+summary(mod_multi)
+```
+
+### Interpreting the Coefficients
+
+The output gives **two sets** of coefficients, one for each non-reference category:
+
+- "Good" vs. "Excellent/VG"
+- "Fair/Poor" vs. "Excellent/VG"
+
+Each $\beta$ is interpreted as a **log relative risk ratio** (RRR). Exponentiating gives the **relative risk ratio** (sometimes called a relative odds ratio) for being in category $k$ vs. the reference, per one-unit change in $X$.
+
+```{r}
+#| label: multinom-rrr
+tidy(mod_multi, conf.int = TRUE, exponentiate = TRUE) |>
+  dplyr::select(y.level, term, estimate, conf.low, conf.high, p.value) |>
+  mutate(across(c(estimate, conf.low, conf.high), \(x) round(x, 3)),
+         p.value = format.pval(p.value, digits = 3)) |>
+  kable(col.names = c("Outcome", "Predictor", "RRR", "Lower", "Upper", "p"),
+        caption = "Multinomial Logistic Regression: RRRs vs. Excellent/VG") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: rrr-smoker
+#| include: false
+rrr_smk <- tidy(mod_multi, conf.int = TRUE, exponentiate = TRUE) |>
+  filter(y.level == "Fair/Poor", term == "smokerCurrent")
+```
+
+::: {.callout-tip}
+## Example interpretation
+
+Holding all else constant, current smokers have a relative risk ratio of **`r f2(rrr_smk$estimate)`** (95% CI `r f2(rrr_smk$conf.low)` to `r f2(rrr_smk$conf.high)`) for reporting "Fair/Poor" health vs. "Excellent/VG" compared to former/never smokers. **In other words, the relative risk of being in the "Fair/Poor" category (rather than "Excellent/VG") is about `r if (rrr_smk$estimate >= 2) paste(f1(rrr_smk$estimate), "times as high") else paste0(round(abs(rrr_smk$estimate - 1) * 100), "% ", if (rrr_smk$estimate > 1) "higher" else "lower")` among current smokers.**
+:::
+
+### Predicted Probabilities
+
+```{r}
+#| label: multinom-pred
+#| fig-alt: "Three-panel line chart of predicted probabilities from the multinomial model against income category 1 to 8, one panel per health category. Excellent/VG rises from about 18% to 58%. Good rises a little to about 37% at middle incomes and ends near 32%. Fair/Poor falls from about 52% to 9%."
+ggpredict(mod_multi, terms = "income_cat [1:8]") |>
+  plot() +
+  labs(title = "Predicted Probability of Each Health Category by Income",
+       x = "Income Category (1 = lowest, 8 = highest)",
+       y = "Predicted Probability") +
+  theme_minimal()
+```
+
+```{r}
+#| label: multinom-pred-text
+#| include: false
+pred_inc <- as_tibble(ggpredict(mod_multi, terms = "income_cat [1:8]"))
+pr <- function(lvl, inc) round(100 * pred_inc$predicted[pred_inc$response.level == lvl & pred_inc$x %in% inc])
+good <- range(pr("Good", 1:8))
+```
+
+::: {.callout-tip}
+## Interpretation
+
+`ggpredict()` holds age and BMI at their means and the factors at their reference levels (male, no exercise, former/never smoker). For that person, the predicted probability of reporting "Fair/Poor" health `r if (pr("Fair/Poor", 8) < pr("Fair/Poor", 1)) "drops" else "rises"` across income levels, from **`r pr("Fair/Poor", 1)`%** at the lowest income category to **`r pr("Fair/Poor", 8)`%** at the highest. The predicted probability of "Excellent/VG" health `r if (pr("Excellent/VG", 8) > pr("Excellent/VG", 1)) "rises" else "falls"` from **`r pr("Excellent/VG", 1)`%** to **`r pr("Excellent/VG", 8)`%** across the same range. The probability of "Good" health stays between `r good[1]`% and `r good[2]`%`r if (diff(good) < abs(pr("Fair/Poor", 8) - pr("Fair/Poor", 1)) / 2) ", reflecting that income mainly shifts respondents between the two extremes rather than into or out of the \"Good\" category" else ""`.
+:::
+
+## Part 2: Ordinal Logistic Regression
+
+When categories are **ordered**, the polytomous model wastes information. It treats "Good" as just as different from "Excellent" as it is from "Fair/Poor". An ordinal model exploits the ordering and produces **fewer parameters** and **easier interpretation**.
+
+### The Proportional Odds (Cumulative Logit) Model
+
+The most common ordinal model is the **proportional odds model**, also called the **cumulative logit model**. Rather than modeling the probability of each category separately (as in the multinomial model), it models the probability of being at or *below* a given category. This respects the ordering of the outcome ("Excellent/VG" < "Good" < "Fair/Poor" in terms of health decline) and yields a single, consistent estimate of each predictor's effect across the entire outcome scale.
+
+The tradeoff for this parsimony is an additional assumption: the **proportional odds assumption**, which requires that the effect of each predictor is the same regardless of which cut-point is being modeled. This should be checked after fitting.
+
+Define **cumulative probabilities**:
+
+$$
+\gamma_k = \Pr(Y \leq k \mid X)
+$$
+
+The model is:
+
+$$
+\log\left[\frac{\Pr(Y \leq k)}{\Pr(Y > k)}\right] = \alpha_k - \beta_1 X_1 - \cdots - \beta_p X_p
+$$
+
+**Key features:**
+
+- One intercept per **cut-point** ($k = 1, \ldots, K - 1$)
+- A **single set of slopes** $\beta$, shared across all cut-points
+- The "proportional odds" assumption: the effect of $X$ on the log-odds of being at or below category $k$ is the **same for every $k$**
+
+With $K = 3$ and 6 predictors, that's $2 + 6 = 8$ parameters (vs. 14 for multinomial).
+
+::: {.callout-note}
+## In plain terms
+
+Imagine income predicts health. The proportional odds assumption says that the boost in odds of being in "Excellent/VG" (vs. "Good or worse") from moving up one income level is the **same** as the boost in odds of being in "Excellent/VG or Good" (vs. "Fair/Poor"). The effect of income doesn't change depending on which boundary you're crossing: it's a single, consistent shift up or down the health scale.
+:::
+
+### Fitting in R: `MASS::polr()`
+
+```{r}
+#| label: polr-fit
+mod_ord <- polr(
+  genhlth_ord ~ age + sex + bmi + exercise + income_cat + smoker,
+  data = brfss_poly,
+  Hess = TRUE
+)
+
+summary(mod_ord)
+```
+
+### Odds Ratios and Interpretation
+
+```{r}
+#| label: polr-or
+tidy(mod_ord, conf.int = TRUE, exponentiate = TRUE) |>
+  filter(coef.type == "coefficient") |>
+  dplyr::select(term, estimate, conf.low, conf.high) |>
+  mutate(across(c(estimate, conf.low, conf.high), \(x) round(x, 3))) |>
+  kable(col.names = c("Predictor", "OR", "Lower", "Upper"),
+        caption = "Ordinal Logistic Regression: Cumulative ORs") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+::: {.callout-tip}
+## Interpretation
+
+An OR of $e^{\beta}$ for a predictor means: a one-unit increase in $X$ multiplies the odds of being in a **worse** health category (i.e., $Y > k$ vs. $Y \leq k$) by $e^{\beta}$, **and this is true at every cut-point**. Here, $\beta$ is the estimated coefficient from the model (a log cumulative odds ratio), and $e^{\beta}$ is simply that coefficient exponentiated, converting it from the log-odds scale to an odds ratio that is easier to interpret.
+:::
+
+```{r}
+#| label: polr-smoker
+#| include: false
+or_smk <- tidy(mod_ord, conf.int = TRUE, exponentiate = TRUE) |>
+  filter(term == "smokerCurrent")
+```
+
+For example, smoking has OR = `r f2(or_smk$estimate)` (95% CI `r f2(or_smk$conf.low)` to `r f2(or_smk$conf.high)`), so current smokers have `r f2(or_smk$estimate)` times the odds of reporting Good or worse health (vs. Excellent/VG), AND `r f2(or_smk$estimate)` times the odds of reporting Fair/Poor (vs. Excellent/VG or Good), if the proportional odds assumption holds for smoking.
+
+### Predicted Probabilities
+
+```{r}
+#| label: polr-pred
+#| fig-alt: "Three-panel line chart of predicted probabilities from the ordinal model against income category 1 to 8. Excellent/VG rises from about 17% to 57%. Good stays near 40%, peaking at about 43% at incomes 3 and 4 and ending near 32%. Fair/Poor falls from about 44% to 11%."
+ggpredict(mod_ord, terms = "income_cat [1:8]") |>
+  plot(show_ci = FALSE) +
+  labs(title = "Ordinal Model: Predicted Probability of Each Health Category",
+       x = "Income Category", y = "Predicted Probability") +
+  theme_minimal()
+```
+
+::: {.callout-warning}
+## No confidence bands here
+
+For `polr()` models, the confidence bands that `ggpredict()` draws are much wider than the uncertainty in the fitted model (we checked them against intervals simulated from the model's estimated coefficients), so this plot shows the predicted probabilities only, with `plot(show_ci = FALSE)`.
+:::
+
+## Part 3: Checking the Proportional Odds Assumption
+
+The proportional odds assumption is **strong**. It states that the effect of each predictor on the log-odds of being at or below any cut-point is constant across all cut-points; in other words, one $\beta$ summarizes the predictor's effect across the entire outcome scale. If this holds, the ordinal model is both valid and parsimonious. If it fails, that single $\beta$ is a misleading average of effects that actually differ across thresholds, and a more flexible model is needed.
+
+There are two complementary ways to evaluate this assumption: a **visual check** and a **formal test**.
+
+### Visual Check: Separate Cut-Point Models
+
+The idea is to fit separate binary logistic regressions at each cumulative cut-point and compare the coefficients. If the proportional odds assumption holds, the log-odds coefficients should be roughly the **same** at both cut-points: the two sets of points should overlap or sit close together. Large separation between cut-points for a given predictor is a warning sign.
+
+```{r}
+#| label: visual-po-check
+#| fig-alt: "Dot-and-interval plot of log-odds coefficients from two cumulative binary models, one per cut-point (at or below Excellent/VG, red circles; at or below Good, blue triangles), for six predictors. Current smoking (about -0.75 and -0.68), female sex (about 0.10 and 0.15), and exercise (about 0.58 and 0.70) overlap across cut-points. Income (about 0.23 and 0.34) has narrow intervals that do not overlap. BMI and age are close to 0 at both cut-points."
+cut1 <- glm(I(as.numeric(genhlth_ord) <= 1) ~ age + sex + bmi + exercise + income_cat + smoker,
+            data = brfss_poly, family = binomial)
+cut2 <- glm(I(as.numeric(genhlth_ord) <= 2) ~ age + sex + bmi + exercise + income_cat + smoker,
+            data = brfss_poly, family = binomial)
+
+bind_rows(
+  broom::tidy(cut1, conf.int = TRUE) |> mutate(cutpoint = "\u2264 Excellent/VG"),
+  broom::tidy(cut2, conf.int = TRUE) |> mutate(cutpoint = "\u2264 Good")
+) |>
+  filter(term != "(Intercept)") |>
+  ggplot(aes(x = estimate, y = term, color = cutpoint, shape = cutpoint)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high),
+                  position = position_dodge(width = 0.5)) +
+  labs(
+    title = "Visual Check: Proportional Odds Assumption",
+    subtitle = "Coefficients should overlap across cut-points if assumption holds",
+    x = "Log-Odds Coefficient",
+    y = "Predictor",
+    color = "Cut-point",
+    shape = "Cut-point"
+  ) +
+  theme_minimal()
+```
+
+Predictors whose point estimates are far apart between cut-points are candidates for violating the assumption; confirm with the Brant test below. Age and BMI are measured per year or per unit, so their coefficients are small and a real difference between cut-points can be hard to see on this scale.
+
+The signs here are the opposite of those in `summary(mod_ord)`: `cut1` and `cut2` model the probability of being **at or below** a category (better health), while `polr()` reports $\beta$ for moving toward a **worse** category. Current smoking, for example, is negative here and positive in the ordinal model.
+
+### Formal Test: Brant Test
+
+- **Omnibus p > 0.05:** no evidence against the assumption for the model overall (which is not proof that it holds)
+- **Predictor-level p < 0.05:** evidence that the assumption fails for that variable
+
+```{r}
+#| label: brant
+# brant() prints its own table; we keep the result and format it below
+invisible(capture.output(brant_out <- brant(mod_ord)))
+
+brant_tbl <- as.data.frame(brant_out) |>
+  tibble::rownames_to_column("Predictor") |>
+  mutate(violated = probability < 0.05)
+
+brant_tbl |>
+  mutate(
+    X2          = round(X2, 2),
+    probability = ifelse(probability < 0.001, "< 0.001", sprintf("%.3f", probability)),
+    Violated    = case_when(
+      Predictor == "Omnibus" & violated ~ "Yes (overall)",
+      Predictor == "Omnibus"            ~ "No (overall)",
+      violated                          ~ "Yes",
+      TRUE                              ~ ""
+    )
+  ) |>
+  dplyr::select(-violated) |>
+  kable(
+    col.names = c("Predictor", "X²", "df", "p-value", "Assumption Violated?"),
+    caption   = "Brant Test for Proportional Odds Assumption",
+    align     = c("l", "r", "r", "r", "c")
+  ) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  row_spec(0, bold = TRUE) |>
+  row_spec(1, bold = TRUE)
+```
+
+```{r}
+#| label: brant-text
+#| include: false
+brant_omni <- brant_tbl[brant_tbl$Predictor == "Omnibus", ]
+pnames <- c(age = "age", sexFemale = "female sex", bmi = "BMI", exerciseYes = "exercise",
+            income_cat = "income", smokerCurrent = "current smoking")
+brant_pred <- brant_tbl[brant_tbl$Predictor != "Omnibus", ]
+```
+
+Here the omnibus test gives $\chi^2$ = `r f2(brant_omni$X2)` on `r brant_omni$df` df (`r fmt_p(brant_omni$probability)`)`r if (brant_omni$violated) ", so the proportional odds assumption does not hold for the model as a whole" else ", so there is no evidence against the assumption for the model as a whole"`. `r if (any(brant_pred$violated)) paste0("The predictors that violate it are ", knitr::combine_words(pnames[brant_pred$Predictor[brant_pred$violated]]), if (any(!brant_pred$violated)) paste0("; ", knitr::combine_words(pnames[brant_pred$Predictor[!brant_pred$violated]]), " show no evidence of a violation") else "", ".") else "No single predictor violates it."`
+
+### What If It Fails?
+
+1. Use the multinomial model instead (loses parsimony, gains flexibility)
+2. Use a **partial proportional odds model** (some $\beta$s vary across cut-points)
+3. Collapse outcome categories
+4. Use a different link (continuation-ratio, adjacent-category)
+
+## Part 4: Comparing the Two Models
+
+```{r}
+#| label: compare
+tibble(
+  Feature = c("Outcome type", "Number of equations", "Parameters (3 cats, 6 preds)",
+              "Key assumption", "Best when"),
+  `Multinomial (multinom)` = c("Nominal or ordinal",
+                                "K - 1 = 2",
+                                "14",
+                                "Independence of irrelevant alternatives (IIA)",
+                                "Categories unordered or PO fails"),
+  `Ordinal (polr)`         = c("Ordinal only",
+                                "1 (with K - 1 cut-points)",
+                                "8",
+                                "Proportional odds",
+                                "Categories ordered AND PO holds")
+) |>
+  kable(caption = "Multinomial vs. Ordinal Logistic Regression") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Likelihood Comparison
+
+Both models are fit by maximum likelihood. We can compare their fits with AIC (lower = better):
+
+```{r}
+#| label: aic-compare
+aic_tbl <- tibble(
+  Model = c("Multinomial", "Ordinal (proportional odds)"),
+  AIC   = c(AIC(mod_multi), AIC(mod_ord)),
+  df    = c(mod_multi$edf, length(coef(mod_ord)) + length(mod_ord$zeta))
+)
+
+aic_tbl |>
+  mutate(AIC = round(AIC, 1)) |>
+  kable(caption = "Model Comparison") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+::: {.callout-note}
+## Tradeoff
+
+The ordinal model is more parsimonious. When proportional odds holds, it usually has the lower AIC, because it fits nearly as well with fewer parameters, and its single set of estimates is more precise. If PO fails, the multinomial model is more honest.
+
+Here the `r if (aic_tbl$AIC[1] < aic_tbl$AIC[2]) "multinomial" else "ordinal"` model has the lower AIC (`r f1(min(aic_tbl$AIC))` vs. `r f1(max(aic_tbl$AIC))` for the `r if (aic_tbl$AIC[1] < aic_tbl$AIC[2]) "ordinal" else "multinomial"` model)`r if (brant_omni$violated) ", and the Brant test rejects proportional odds" else ", and the Brant test finds no evidence against proportional odds"`, so `r if (brant_omni$violated || aic_tbl$AIC[1] < aic_tbl$AIC[2]) "the multinomial model is the better choice for these data" else "the ordinal model is the better choice for these data"`.
+:::
+
+## Summary
+
+| Concept | Key Point |
+|---------|-----------|
+| **Polytomous outcome** | Use `nnet::multinom()` for $K > 2$ categories |
+| **Coefficients** | $K - 1$ sets, each interpreted as log relative risk ratios vs. reference |
+| **Ordinal outcome** | Use `MASS::polr()` to exploit ordering |
+| **Cumulative logit** | Single set of $\beta$s describes all cut-points |
+| **Proportional odds** | Strong assumption; check with `brant()` |
+| **Model choice** | Ordinal if ordered AND PO holds; otherwise multinomial |
+
+### Next Lecture
+
+- Logistic regression applications and case studies
+- Putting it all together: model building strategy
+- Reporting results for publication
+
+## References
+
+- Kleinbaum, D. G., Kupper, L. L., Nizam, A., & Rosenberg, E. S. (2013). *Applied Regression Analysis and Other Multivariable Methods* (5th ed.), Chapter 23.
+- Hosmer, D. W., Lemeshow, S., & Sturdivant, R. X. (2013). *Applied Logistic Regression* (3rd ed.), Chapter 8.
+- Agresti, A. (2010). *Analysis of Ordinal Categorical Data* (2nd ed.). Wiley.
+
+## Part 5: In-Class Lab Activity
+
+### Instructions
+
+Complete the four tasks below using the BRFSS 2020 sample from this lecture.
+
+[Download the lab template (.qmd)](../labs/templates/template-polytomous-ordinal-lab.qmd){.btn .btn-sm .btn-outline-primary download="polytomous-ordinal-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_Polytomous_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `genhlth_ord` | General health (Excellent/VG < Good < Fair/Poor) | Ordered factor (outcome) |
+| `genhlth_nom` | General health, unordered | Factor (outcome) |
+| `age` | Age in years | Numeric |
+| `sex` | Male / Female | Factor |
+| `bmi` | Body mass index | Numeric |
+| `exercise` | Exercised in past 30 days (No/Yes) | Factor |
+| `income_cat` | Household income (1-8) | Numeric |
+| `smoker` | Former/Never vs. Current | Factor |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages (MASS first, so it does not mask dplyr's select())
+library(MASS)
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(nnet)
+library(brant)
+library(ggeffects)
+
+options(gtsummary.use_ftExtra = TRUE)
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("GENHLTH", "_AGE80", "SEXVAR", "_BMI5", "EXERANY2", "INCOME2",
+           "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+
+brfss_poly <- brfss_full |>
+  mutate(
+    # 3-level ordinal outcome
+    genhlth_3 = case_when(
+      genhlth %in% c(1, 2) ~ "Excellent/VG",
+      genhlth == 3         ~ "Good",
+      genhlth %in% c(4, 5) ~ "Fair/Poor",
+      TRUE                 ~ NA_character_
+    ),
+    # Ordered factor for ordinal regression
+    genhlth_ord = factor(genhlth_3,
+      levels = c("Excellent/VG", "Good", "Fair/Poor"),
+      ordered = TRUE),
+    # Unordered factor for polytomous regression
+    genhlth_nom = factor(genhlth_3,
+      levels = c("Excellent/VG", "Good", "Fair/Poor")),
+    # Predictors
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(genhlth_ord), !is.na(age), age >= 18, !is.na(sex),
+    !is.na(bmi), !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_poly <- brfss_poly |>
+  dplyr::select(genhlth_ord, genhlth_nom, age, sex, bmi,
+                exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Explore the Outcome (15 points)
+
+**1a. (5 pts)** Create a frequency table of `genhlth_ord` showing N and percentage for each category.
+
+**1b. (5 pts)** Create a stacked bar chart showing the distribution of general health by `smoker` status.
+
+**1c. (5 pts)** Use `tbl_summary()` to create a descriptive table stratified by `genhlth_ord` with at least 4 predictors.
+
+### Task 2: Multinomial Logistic Regression (20 points)
+
+**2a. (5 pts)** Fit a multinomial logistic regression model predicting `genhlth_nom` from at least 4 predictors using `multinom()`.
+
+**2b. (10 pts)** Report the relative risk ratios (exponentiated coefficients) with 95% CIs in a clean table.
+
+**2c. (5 pts)** Interpret the RRR for one predictor in the "Fair/Poor vs. Excellent/VG" comparison.
+
+### Task 3: Ordinal Logistic Regression (25 points)
+
+**3a. (5 pts)** Fit an ordinal logistic regression model with the same predictors using `polr()`.
+
+**3b. (5 pts)** Report the cumulative ORs with 95% CIs.
+
+**3c. (5 pts)** Interpret one OR in plain language, making sure to mention the "at every cut-point" property.
+
+**3d. (10 pts)** Use `ggpredict()` to plot predicted probabilities of each health category across a continuous predictor of your choice. Use `plot(show_ci = FALSE)`, as in the lecture: the bands `ggpredict()` draws for `polr()` models are too wide.
+
+### Task 4: Check Assumptions and Compare (15 points)
+
+**4a. (5 pts)** Run the Brant test for proportional odds. Does the assumption hold?
+
+**4b. (5 pts)** Compare the AIC of the multinomial and ordinal models. Which fits better?
+
+**4c. (5 pts)** Based on your results, which model would you recommend reporting? Justify in 2-3 sentences.
+
+**Completion credit (25 points):** Awarded for a complete, good-faith attempt. Total: 75 + 25 = 100 points.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

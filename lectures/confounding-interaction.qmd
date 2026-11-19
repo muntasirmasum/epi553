@@ -227,7 +227,7 @@ brfss_ci |>
   bold_labels() |>
   italicize_levels() |>
   modify_caption("Table 1. Descriptive statistics, BRFSS 2020 (n = 5,000)") |>
-  as_kable_extra()
+  as_kable_extra(escape = TRUE)
 ```
 
 **Interpretation:** The analytic sample includes 5,000 randomly selected BRFSS 2020 respondents. On average, participants reported `r round(mean(brfss_ci$physhlth_days), 1)` physically unhealthy days in the past 30 (SD = `r round(sd(brfss_ci$physhlth_days), 1)`), indicating a right-skewed distribution where most respondents report few or no unhealthy days. Mean sleep duration was `r round(mean(brfss_ci$sleep_hrs), 1)` hours per night (SD = `r round(sd(brfss_ci$sleep_hrs), 1)`), `r if (mean(brfss_ci$sleep_hrs) >= 7) "which meets" else "just below"` the CDC recommendation of 7 or more hours. The sample is `r round(mean(brfss_ci$sex == "Female") * 100, 1)`% female and is well-educated, with `r round(mean(brfss_ci$education == "College graduate") * 100, 1)`% holding a college degree. The majority (`r round(mean(brfss_ci$exercise == "Yes") * 100, 1)`%) reported engaging in physical activity in the past 30 days. These sample characteristics should be kept in mind when interpreting results, as the sample may not be representative of the general U.S. population.

@@ -1,0 +1,560 @@
+---
+title: "Logistic Regression Applications"
+subtitle: "Build, check, and report a logistic regression analysis from start to finish."
+description: "A model-building strategy worked through on BRFSS 2020: Table 1, univariable screening, the multivariable model, confounding, effect modification, fit checks, a forest plot, and a publication-ready paragraph."
+order: 15
+unit: "Logistic regression"
+categories: [Logistic regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+f1 <- function(x) formatC(x, format = "f", digits = 1)
+f2 <- function(x) formatC(x, format = "f", digits = 2)
+# Odds ratio and profile 95% CI for one term, as in the tables
+or_row <- function(model, term) {
+  broom::tidy(model, exponentiate = TRUE, conf.int = TRUE) |>
+    dplyr::filter(.data$term == .env$term)
+}
+or_text <- function(model, term) {
+  r <- or_row(model, term)
+  paste0(f2(r$estimate), " (95% CI ", f2(r$conf.low), " to ", f2(r$conf.high), ")")
+}
+# "30% lower" or "60% higher" odds
+odds_change <- function(or) paste0(round(abs(or - 1) * 100), "% ", if (or < 1) "lower" else "higher")
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- follow a seven-step workflow from research question to reported model;
+- screen candidate predictors and build a multivariable logistic model with gtsummary tables;
+- assess confounding with the 10% change-in-estimate rule and effect modification with a likelihood ratio test;
+- check model fit, discrimination, and collinearity before reporting;
+- write a results paragraph whose wording follows the estimates, and avoid common pitfalls.
+:::
+
+## Introduction
+
+Over the last three lectures we have built up the machinery of logistic regression: the logit link, odds ratios, multiple predictors, Wald and likelihood ratio tests, interactions, goodness-of-fit, discrimination, and the polytomous and ordinal extensions. Today we put it all together.
+
+This is an **applications lecture**. We will work through a complete analytic workflow, from research question to publication-ready table, the way you would for a manuscript or a thesis chapter.
+
+::: {.callout-note}
+## Today's roadmap
+
+1. A principled model-building strategy
+2. Worked example: building a final model
+3. Reporting results for publication
+4. Common pitfalls and how to avoid them
+:::
+
+## Part 1: A Model-Building Strategy
+
+There is no single "correct" way to build a regression model. But there is a sensible workflow that most epidemiologists follow:
+
+```{r}
+#| label: workflow-table
+#| echo: false
+library(knitr)
+library(kableExtra)
+
+tibble::tibble(
+  Step = 1:7,
+  Phase = c(
+    "Define the research question",
+    "Univariable screening",
+    "Build the multivariable model",
+    "Assess confounding",
+    "Test interactions",
+    "Check fit and assumptions",
+    "Report and interpret"
+  ),
+  Tools = c(
+    "DAG, prior literature, study design",
+    "Simple glm() per predictor; tbl_uvregression()",
+    "glm() with all candidates; tbl_regression()",
+    "10% change-in-estimate rule; compare crude vs adjusted",
+    "* operator; LR test; ggpredict()",
+    "HL test, calibration, ROC/AUC, Cook's D, VIF",
+    "tbl_regression(); narrative interpretation"
+  )
+) |>
+  kable(caption = "Seven-Step Logistic Regression Workflow") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+### Two Schools of Thought
+
+**Predictive modeling.** Goal: maximize out-of-sample accuracy. Use stepwise selection, LASSO, cross-validation, AUC. The OR is a means to an end.
+
+**Etiologic / explanatory modeling.** Goal: estimate the unbiased causal effect of an exposure on an outcome. Use a DAG to choose covariates. Confounders are included; mediators and colliders are excluded. The OR for the exposure is the answer.
+
+Most public health research is **etiologic**. Today we adopt that mindset.
+
+## Part 2: Worked Example
+
+### Setup
+
+```{r}
+#| label: libraries
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(car)
+library(ggeffects)
+library(ResourceSelection)
+library(pROC)
+library(performance)
+```
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. The code below repeats the recoding and sample from Logistic Regression, Part 1, so this page uses the same 5,000 adults.
+
+Install the packages this lecture adds once with `install.packages(c("brfssdata", "janitor", "ResourceSelection", "pROC", "performance"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the ten BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+```
+
+The question about current smoking (`SMOKDAY2`) is asked only of people who have smoked at least 100 cigarettes in their life (`SMOKE100`). People who never reached 100 cigarettes are coded as former/never smokers rather than dropped.
+
+```{r}
+#| label: prepare-data
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+### Research Question
+
+> *Among U.S. adults, is any physical activity or exercise in the past 30 days (outside of work) associated with lower odds of frequent mental distress (FMD), after adjusting for demographic, behavioral, and socioeconomic confounders? Does the association differ by sex?*
+
+- **Exposure:** `exercise` (Yes / No)
+- **Outcome:** `fmd` (Yes / No)
+- **Candidate confounders:** age, sex, BMI, sleep hours, income category, smoking status
+- **Effect modifier of interest:** sex
+
+### Step 1: Descriptive Table (Table 1)
+
+```{r}
+#| label: table1
+brfss_logistic |>
+  tbl_summary(
+    by = fmd,
+    include = c(exercise, age, sex, bmi, sleep_hrs, income_cat, smoker),
+    statistic = list(all_continuous() ~ "{mean} ({sd})"),
+    label = list(
+      exercise   ~ "Exercise (past 30 days)",
+      age        ~ "Age (years)",
+      sex        ~ "Sex",
+      bmi        ~ "BMI (kg/m²)",
+      sleep_hrs  ~ "Sleep (hours)",
+      income_cat ~ "Income category",
+      smoker     ~ "Smoking status"
+    )
+  ) |>
+  add_p(test = all_continuous() ~ "t.test") |>
+  add_overall() |>
+  bold_labels() |>
+  modify_header(label ~ "**Characteristic**") |>
+  modify_caption("Table 1. Sample characteristics by frequent mental distress status.") |>
+  as_kable_extra(escape = TRUE)
+```
+
+### Step 2: Univariable Screening
+
+```{r}
+#| label: univariable
+brfss_logistic |>
+  tbl_uvregression(
+    method = glm,
+    y = fmd,
+    method.args = list(family = binomial),
+    exponentiate = TRUE,
+    include = c(exercise, age, sex, bmi, sleep_hrs, income_cat, smoker)
+  ) |>
+  bold_labels() |>
+  modify_caption("Table 2. Crude (unadjusted) odds ratios for frequent mental distress.") |>
+  as_kable_extra(escape = TRUE)
+```
+
+### Step 3: Build the Multivariable Model
+
+```{r}
+#| label: multivariable
+mod_full <- glm(
+  fmd ~ exercise + age + sex + bmi + sleep_hrs + income_cat + smoker,
+  data = brfss_logistic,
+  family = binomial
+)
+
+mod_full |>
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      exercise   ~ "Exercise",
+      age        ~ "Age",
+      sex        ~ "Sex",
+      bmi        ~ "BMI",
+      sleep_hrs  ~ "Sleep hours",
+      income_cat ~ "Income category",
+      smoker     ~ "Smoker"
+    )
+  ) |>
+  bold_labels() |>
+  bold_p() |>
+  modify_caption("Table 3. Adjusted odds ratios for frequent mental distress.") |>
+  as_kable_extra(escape = TRUE)
+```
+
+### Step 4: Assess Confounding
+
+The classic **10% change-in-estimate** rule: a covariate is a confounder of the exposure-outcome relationship if including it changes the exposure OR by more than 10%.
+
+```{r}
+#| label: confounding
+mod_crude <- glm(fmd ~ exercise, data = brfss_logistic, family = binomial)
+
+crude_or <- exp(coef(mod_crude)["exerciseYes"])
+adj_or   <- exp(coef(mod_full)["exerciseYes"])
+pct_change <- 100 * abs(adj_or - crude_or) / crude_or  # size of the change
+
+tibble(
+  Quantity = c("Crude OR (exercise)",
+               "Adjusted OR (exercise)",
+               "% change in estimate (absolute)"),
+  Value    = c(round(crude_or, 3),
+               round(adj_or, 3),
+               paste0(round(pct_change, 1), "%"))
+) |>
+  kable(caption = "Change-in-Estimate for Exercise") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+::: {.callout-tip}
+## Interpretation
+
+A change of more than 10% in either direction suggests meaningful confounding by the included covariates; the table reports the size of the change. Here the exercise OR moves from `r f2(crude_or)` (crude) to `r f2(adj_or)` (adjusted), a change of `r f1(pct_change)`%, `r if (pct_change > 10) "more than 10%, so the covariates confound the association between exercise and FMD" else "less than 10%, so there is little evidence of confounding by these covariates"`. The adjusted OR is `r if (abs(log(adj_or)) < abs(log(crude_or))) "closer to 1" else "further from 1"`: `r if (abs(log(adj_or)) < abs(log(crude_or))) "part of the crude association reflects differences in age, sex, BMI, sleep, income, and smoking between adults who do and do not exercise" else "the covariates were masking part of the association"`. After adjustment the 95% CI for exercise is `r f2(or_row(mod_full, "exerciseYes")$conf.low)` to `r f2(or_row(mod_full, "exerciseYes")$conf.high)`, which `r if (or_row(mod_full, "exerciseYes")$conf.low > 1 || or_row(mod_full, "exerciseYes")$conf.high < 1) "excludes" else "includes"` 1. The adjusted OR is the more reliable estimate.
+:::
+
+```{r}
+#| label: mediator-check
+#| include: false
+mod_no_med <- update(mod_full, . ~ . - sleep_hrs - bmi)
+```
+
+::: {.callout-warning}
+## Confounder or mediator?
+
+The etiologic approach in Part 1 leaves mediators out of the model, yet the model above adjusts for sleep hours and BMI. Exercise can improve sleep and lower BMI, so both may lie on the path from exercise to mental distress. Adjusting for a mediator removes part of the effect we want to estimate, so part of the change from the crude OR may not be confounding. Leaving sleep and BMI out (adjusting for age, sex, income, and smoking only) gives an exercise OR of `r or_text(mod_no_med, "exerciseYes")`. A DAG drawn before the analysis is how to decide which model answers the research question.
+:::
+
+### Step 5: Test for Effect Modification by Sex
+
+```{r}
+#| label: interaction
+mod_int <- glm(
+  fmd ~ exercise * sex + age + bmi + sleep_hrs + income_cat + smoker,
+  data = brfss_logistic,
+  family = binomial
+)
+
+lr_int <- anova(mod_full, mod_int, test = "LRT")
+
+lr_int |>
+  kable(digits = 3, caption = "LR Test: Exercise × Sex Interaction") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+The LR statistic is `r f2(lr_int$Deviance[2])` on `r lr_int$Df[2]` df (`r fmt_p(lr_int[["Pr(>Chi)"]][2])`), so `r if (lr_int[["Pr(>Chi)"]][2] < 0.05) "the association between exercise and FMD differs by sex" else "there is no evidence that the association between exercise and FMD differs by sex"`.
+
+```{r}
+#| label: interaction-plot
+#| fig-alt: "Dot-and-interval plot of the predicted probability of FMD by exercise (No, Yes) and sex. Women are higher at both levels, about 15% without exercise and 13% with it; men are about 8% at both levels. The 95% intervals for adults who do not exercise are wide."
+ggpredict(mod_int, terms = c("exercise", "sex")) |>
+  plot() +
+  labs(title = "Predicted Probability of FMD by Exercise and Sex",
+       x = "Exercise", y = "Predicted Probability", color = "Sex") +
+  theme_minimal()
+```
+
+### Stratum-Specific Estimates
+
+If the interaction is meaningful, report ORs **within each level of sex**:
+
+```{r}
+#| label: strata
+mod_male <- glm(
+  fmd ~ exercise + age + bmi + sleep_hrs + income_cat + smoker,
+  data = filter(brfss_logistic, sex == "Male"),
+  family = binomial
+)
+
+mod_female <- glm(
+  fmd ~ exercise + age + bmi + sleep_hrs + income_cat + smoker,
+  data = filter(brfss_logistic, sex == "Female"),
+  family = binomial
+)
+
+strata <- bind_rows(
+  tidy(mod_male,   exponentiate = TRUE, conf.int = TRUE) |>
+    filter(term == "exerciseYes") |> mutate(stratum = "Male"),
+  tidy(mod_female, exponentiate = TRUE, conf.int = TRUE) |>
+    filter(term == "exerciseYes") |> mutate(stratum = "Female")
+)
+
+# ORs implied by the interaction model (the model the LR test in Step 5 uses)
+b <- coef(mod_int)
+or_int <- c(Male   = exp(b[["exerciseYes"]]),
+            Female = exp(b[["exerciseYes"]] + b[["exerciseYes:sexFemale"]]))
+
+strata |>
+  dplyr::select(stratum, estimate, conf.low, conf.high, p.value) |>
+  mutate(across(c(estimate, conf.low, conf.high), \(x) round(x, 3)),
+         p.value = format.pval(p.value, digits = 3)) |>
+  kable(col.names = c("Sex", "OR (Exercise)", "Lower", "Upper", "p"),
+        caption = "Stratum-Specific ORs for Exercise") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+Here the exercise OR is `r f2(strata$estimate[1])` among men and `r f2(strata$estimate[2])` among women. These come from separate models for men and women, which let every covariate's effect differ by sex. The interaction model tested in Step 5 lets only the exercise effect differ; its ORs are `r f2(or_int[["Male"]])` for men and `r f2(or_int[["Female"]])` for women. `r if (lr_int[["Pr(>Chi)"]][2] >= 0.05) "The point estimates differ, but the interaction test found no evidence that the difference is larger than chance, so the single adjusted OR from Step 3 is the main result; the stratum-specific ORs are shown for transparency." else "The interaction is statistically significant, so these stratum-specific ORs, not a single adjusted OR, are the main result."`
+
+### Step 6: Check Fit and Assumptions
+
+```{r}
+#| label: diagnostics
+fit_stats <- list(
+  `McFadden R²`   = round(performance::r2_mcfadden(mod_full)$R2, 3),
+  `HL p-value`    = round(hoslem.test(
+                      x = as.numeric(brfss_logistic$fmd) - 1,
+                      y = fitted(mod_full), g = 10)$p.value, 3),
+  `AUC`           = round(as.numeric(auc(roc(
+                      brfss_logistic$fmd, fitted(mod_full),
+                      levels = c("No", "Yes"), direction = "<", quiet = TRUE))), 3),
+  `Max VIF`       = round(max(car::vif(mod_full)), 2)
+)
+
+tibble(Measure = names(fit_stats), Value = unlist(fit_stats)) |>
+  kable(caption = "Fit and Diagnostic Summary") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+```{r}
+#| label: auc-band
+#| include: false
+auc_num <- fit_stats$AUC
+cuts <- c(0.5, 0.7, 0.8, 0.9)
+bands <- c("no", "poor", "acceptable", "excellent", "outstanding")
+near <- which(abs(auc_num - cuts) < 0.005)
+auc_words <- if (length(near)) {
+  paste("at the boundary between", bands[near], "and", bands[near + 1], "discrimination")
+} else {
+  paste(bands[findInterval(auc_num, cuts) + 1], "discrimination")
+}
+```
+
+McFadden's R² is `r fit_stats[["McFadden R²"]]`. The Hosmer-Lemeshow test `r if (fit_stats[["HL p-value"]] < 0.05) "detects some lack of fit" else "finds no evidence of lack of fit"` (`r fmt_p(fit_stats[["HL p-value"]])`). The AUC of `r formatC(auc_num, format = "f", digits = 3)` is `r auc_words` on the scale from Logistic Regression, Part 2. The largest VIF is `r fit_stats[["Max VIF"]]`, `r if (fit_stats[["Max VIF"]] < 5) "so collinearity is not a concern" else "so collinearity deserves a closer look"`.
+
+### Step 7: Forest Plot of Final Model
+
+```{r}
+#| label: forest
+#| fig-alt: "Forest plot of adjusted odds ratios with 95% confidence intervals on a log-scale x-axis, with a dashed grey reference line at 1. From largest to smallest: female sex about 1.8, current smoking about 1.6, BMI just above 1, age just below 1, income and exercise about 0.87, and sleep hours about 0.79. Current smoking and exercise have the widest intervals; exercise's, about 0.71 to 1.06, is the only one that crosses 1."
+term_names <- c(exerciseYes = "Exercise", age = "Age", sexFemale = "Female sex", bmi = "BMI",
+                sleep_hrs = "Sleep hours", income_cat = "Income category",
+                smokerCurrent = "Current smoker")
+
+tidy(mod_full, exponentiate = TRUE, conf.int = TRUE) |>
+  filter(term != "(Intercept)") |>
+  ggplot(aes(x = estimate, y = fct_reorder(term_names[term], estimate))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high),
+                  color = "steelblue", linewidth = 0.8) +
+  scale_x_log10() +
+  labs(title = "Adjusted Odds Ratios for Frequent Mental Distress",
+       x = "Adjusted OR (log scale)", y = NULL) +
+  theme_minimal()
+```
+
+## Part 3: Reporting Results
+
+### A Publication-Ready Paragraph
+
+```{r}
+#| label: report-numbers
+#| include: false
+smk <- or_row(mod_full, "smokerCurrent")
+slp <- or_row(mod_full, "sleep_hrs")
+exr <- or_row(mod_full, "exerciseYes")
+aor <- function(r) paste0("aOR = ", f2(r$estimate), "; 95% CI: ", f2(r$conf.low), ", ", f2(r$conf.high))
+excludes_1 <- function(r) r$conf.low > 1 || r$conf.high < 1
+crude_sig <- excludes_1(or_row(mod_crude, "exerciseYes"))
+p_int <- lr_int[["Pr(>Chi)"]][2]
+```
+
+The paragraph below is written from the estimates above; every number and every direction word comes from the model output.
+
+> *In adjusted models, current smokers had `r f2(smk$estimate)` times the odds of frequent mental distress compared with former or never smokers (`r aor(smk)`). Each additional hour of sleep was associated with `r odds_change(slp$estimate)` odds of FMD (`r aor(slp)`). `r if (excludes_1(exr)) paste0("After adjustment for demographic, behavioral, and socioeconomic covariates, exercise was associated with ", if (exr$estimate < 1) "lower" else "higher", " odds of FMD (", aor(exr), ").") else if (crude_sig) paste0("Exercise was associated with ", if (crude_or < 1) "lower" else "higher", " odds of FMD before adjustment (crude OR = ", f2(crude_or), "), but after adjustment for demographic, behavioral, and socioeconomic covariates the association was ", if (abs(log(adj_or)) < abs(log(crude_or))) "attenuated and " else "", "no longer statistically significant (", aor(exr), ").") else paste0("Exercise was not significantly associated with FMD before or after adjustment (", aor(exr), ").")` The likelihood ratio test for an exercise × sex interaction was `r if (p_int < 0.05) "statistically significant" else "not statistically significant"` (`r fmt_p(p_int)`; exercise ORs from the interaction model `r f2(or_int[["Male"]])` for men and `r f2(or_int[["Female"]])` for women)`r if (p_int < 0.05) ", so the association with exercise differs by sex." else ", so the data provide no evidence that the association with exercise differs by sex."`*
+
+### What Every Logistic Regression Paper Should Report
+
+1. **Sample size and outcome prevalence**
+2. **Table 1** stratified by outcome
+3. **Crude and adjusted ORs** with 95% CIs (not just p-values)
+4. **Which covariates were included and why** (DAG, prior literature, change-in-estimate)
+5. **Tests of effect modification** that were planned
+6. **Goodness-of-fit and discrimination** metrics (HL or calibration plot, AUC)
+7. **Software and packages** with versions
+
+## Part 4: Common Pitfalls
+
+```{r}
+#| label: pitfalls
+#| echo: false
+tibble::tibble(
+  Pitfall = c(
+    "Reporting p-values without ORs and CIs",
+    "Stepwise selection on small samples",
+    "Adjusting for mediators",
+    "Adjusting for colliders",
+    "Ignoring the events-per-variable rule (EPV < 10)",
+    "Interpreting OR as relative risk when outcome is common",
+    "Forgetting to check linearity in the logit",
+    "Reporting only the p-value of an interaction"
+  ),
+  Fix = c(
+    "Always show point estimates with 95% CIs",
+    "Use a DAG; pre-specify covariates",
+    "Draw a DAG; do not adjust on the causal pathway",
+    "Avoid conditioning on common effects of exposure and outcome",
+    "Aim for ≥ 10 events per predictor; use penalized methods if not",
+    "Use log-binomial or modified Poisson when prevalence > ~10%",
+    "Restricted cubic splines or LOWESS-of-logit plots",
+    "Always show stratum-specific estimates"
+  )
+) |>
+  kable(caption = "Common Pitfalls in Logistic Regression") |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Summary
+
+| Step | Key Action |
+|------|-----------|
+| **1. Question** | Anchor your model in a clear research question and DAG |
+| **2. Screen** | Univariable models inform but do not select |
+| **3. Build** | Include confounders identified a priori |
+| **4. Confound** | Compare crude vs adjusted; 10% rule of thumb |
+| **5. Modify** | Plan interactions; report stratum-specific estimates |
+| **6. Check** | Fit, calibration, discrimination, diagnostics |
+| **7. Report** | ORs + CIs, narrative interpretation, full transparency |
+
+### Next Lecture
+
+- Poisson regression for count outcomes
+- Survival analysis: an introduction
+
+## References
+
+- Kleinbaum, D. G., Kupper, L. L., Nizam, A., & Rosenberg, E. S. (2013). *Applied Regression Analysis and Other Multivariable Methods* (5th ed.), Chapters 22-23.
+- Hosmer, D. W., Lemeshow, S., & Sturdivant, R. X. (2013). *Applied Logistic Regression* (3rd ed.). Wiley.
+- Vittinghoff, E., et al. (2012). *Regression Methods in Biostatistics* (2nd ed.). Springer.
+- Greenland, S. (1989). Modeling and variable selection in epidemiologic analysis. *American Journal of Public Health*, 79(3), 340-349.
+
+*No lab activity for this lecture: you have practiced this workflow in the previous three labs.*
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::

@@ -1,0 +1,229 @@
+---
+title: "Logistic Regression, Part 2 Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(car)
+library(ggeffects)
+library(ResourceSelection)
+library(pROC)
+library(performance)
+
+options(gtsummary.use_ftExtra = TRUE)
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Build a Multiple Logistic Regression Model (15 points)
+
+**1a. (5 pts)** Fit a multiple logistic regression model predicting `fmd` from at least 5 predictors of your choice.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Report the adjusted ORs with 95% CIs in a publication-quality table using `tbl_regression()`.
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Interpret the adjusted OR for two predictors of your choice in 1-2 sentences each. Make sure to mention what the OR represents (per unit change for continuous; reference category for categorical).
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: Wald and Likelihood Ratio Tests (15 points)
+
+**2a. (5 pts)** Identify the Wald p-value for each predictor in your model from the `tidy()` or `summary()` output.
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Fit a reduced model that drops one predictor of your choice. Perform a likelihood ratio test comparing the full and reduced models using `anova(reduced, full, test = "LRT")`.
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** Compare the conclusions from the Wald test (for the dropped predictor) and the LR test. Do they agree? In 2-3 sentences, explain when the two tests might disagree.
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+## Task 3: Test an Interaction (20 points)
+
+**3a. (5 pts)** Fit a model that includes an interaction between two predictors of your choice (e.g., `exercise * sex` or `smoker * age`).
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (5 pts)** Perform a likelihood ratio test comparing the model with the interaction to the model without it.
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (5 pts)** Create a visualization of the interaction using `ggpredict()` and `plot()`.
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+**3d. (5 pts)** In 3-4 sentences, interpret the interaction. Does the effect of one predictor differ across levels of the other? If statistically significant, report the stratum-specific odds ratios.
+
+```{r}
+#| label: task-3d
+
+```
+
+*Your answer:*
+
+## Task 4: Goodness-of-Fit and Discrimination (25 points)
+
+**4a. (5 pts)** Compute McFadden's pseudo-R² for your full model using `performance::r2_mcfadden()`.
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (5 pts)** Perform the Hosmer-Lemeshow goodness-of-fit test using `ResourceSelection::hoslem.test()`. Report the test statistic and p-value. Comment on the interpretation given your sample size.
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** Create a calibration plot showing observed vs. predicted probabilities by decile. Comment on whether the model appears well calibrated.
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+**4d. (10 pts)** Compute and plot the ROC curve using `pROC::roc()`. Report the AUC. Based on the AUC value, how would you describe the model's discrimination ability (poor, acceptable, excellent, outstanding)?
+
+```{r}
+#| label: task-4d
+
+```
+
+*Your answer:*
+
+**Completion credit (25 points):** Awarded for a complete, good-faith attempt at all tasks. Total: 75 + 25 = 100 points.

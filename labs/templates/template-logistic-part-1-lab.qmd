@@ -1,0 +1,225 @@
+---
+title: "Logistic Regression, Part 1 Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(ggeffects)
+
+options(gtsummary.use_ftExtra = TRUE)
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Explore the Binary Outcome (15 points)
+
+**1a. (5 pts)** Create a frequency table showing the number and percentage of individuals with and without frequent mental distress.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Create a descriptive summary table of at least 4 predictors, stratified by FMD status. Use `tbl_summary()`.
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Create a bar chart showing the proportion of FMD by exercise status OR smoking status.
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: Simple Logistic Regression (20 points)
+
+**2a. (5 pts)** Fit a simple logistic regression model predicting FMD from **exercise**. Report the coefficients on the log-odds scale.
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (5 pts)** Exponentiate the coefficients to obtain odds ratios with 95% confidence intervals.
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** Interpret the odds ratio for exercise in the context of the research question.
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+**2d. (5 pts)** Create a plot showing the predicted probability of FMD across levels of a continuous predictor (e.g., age or sleep hours).
+
+```{r}
+#| label: task-2d
+
+```
+
+*Your answer:*
+
+## Task 3: Comparing Predictors (20 points)
+
+**3a. (5 pts)** Fit three separate simple logistic regression models, each with a different predictor of your choice.
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (10 pts)** Create a table comparing the odds ratios from all three models.
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (5 pts)** Which predictor has the strongest crude association with FMD? Justify your answer.
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+## Task 4: Introduction to Multiple Logistic Regression (20 points)
+
+**4a. (5 pts)** Fit a multiple logistic regression model predicting FMD from at least 3 predictors.
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (5 pts)** Report the adjusted odds ratios using `tbl_regression()`.
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** For one predictor, compare the crude OR (from Task 3) with the adjusted OR (from Task 4). Show both values.
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+**4d. (5 pts)** In 2-3 sentences, assess whether confounding is present for the predictor you chose. Which direction did the OR change, and what does this mean?
+
+```{r}
+#| label: task-4d
+
+```
+
+*Your answer:*
+
+**Completion credit (25 points):** Awarded for a complete, good-faith attempt at all tasks. Total: 75 + 25 = 100 points.

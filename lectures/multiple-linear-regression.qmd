@@ -194,7 +194,7 @@ brfss_mlr |>
   bold_labels() |>
   italicize_levels() |>
   modify_caption("Table 1. Descriptive statistics, BRFSS 2020 analytic sample (n = 5,000)") |>
-  as_kable_extra()
+  as_kable_extra(escape = TRUE)
 ```
 
 ```{r}

@@ -1,0 +1,912 @@
+---
+title: "Logistic Regression, Part 2"
+subtitle: "Test, assess, and report a multiple logistic regression model."
+description: "Maximum likelihood, Wald and likelihood ratio tests, interaction, goodness of fit (deviance, pseudo-R², Hosmer-Lemeshow, calibration), ROC curves and AUC, diagnostics, and reporting, using frequent mental distress in BRFSS 2020."
+order: 13
+unit: "Logistic regression"
+categories: [Logistic regression]
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(gtsummary.use_ftExtra = TRUE)
+gtsummary::set_gtsummary_theme(gtsummary::theme_gtsummary_compact(set_theme = TRUE))
+
+# Helpers for sentences written from the output
+fmt_p <- function(p) if (p < 0.001) "p < 0.001" else paste0("p = ", formatC(p, format = "f", digits = 3))
+more_fewer <- function(x) if (x >= 0) "more" else "fewer"
+pm <- function(x) paste(if (x < 0) "-" else "+", abs(x))  # signed term for equations
+sig_text <- function(p) {
+  if (p < 0.05) paste0("statistically significant, ", fmt_p(p))
+  else paste0("not statistically significant, ", fmt_p(p))
+}
+f1 <- function(x) formatC(x, format = "f", digits = 1)
+f2 <- function(x) formatC(x, format = "f", digits = 2)
+# Odds ratio and profile 95% CI for one term, as in the tables
+or_row <- function(model, term) {
+  broom::tidy(model, exponentiate = TRUE, conf.int = TRUE) |>
+    dplyr::filter(.data$term == .env$term)
+}
+or_text <- function(model, term) {
+  r <- or_row(model, term)
+  paste0(f2(r$estimate), " (95% CI ", f2(r$conf.low), " to ", f2(r$conf.high), ")")
+}
+# "30% lower" or "60% higher" odds
+odds_change <- function(or) paste0(round(abs(or - 1) * 100), "% ", if (or < 1) "lower" else "higher")
+```
+
+::: {.callout-note appearance="simple" icon="false"}
+## Learning objectives
+
+By the end of this lecture you will be able to:
+
+- fit a multiple logistic regression model and interpret adjusted odds ratios, including for rescaled continuous predictors;
+- explain maximum likelihood estimation and compare Wald and likelihood ratio tests;
+- test an interaction in a logistic model and report stratum-specific odds ratios;
+- assess goodness of fit with deviance, McFadden's pseudo-R², the Hosmer-Lemeshow test, and a calibration plot;
+- assess discrimination with an ROC curve and the AUC, and check linearity in the logit, influence, and collinearity.
+:::
+
+## Introduction
+
+In Part 1, we introduced the logistic model, the logit transformation, and the connection between logistic regression coefficients and odds ratios. We fit simple logistic regression models with single predictors and previewed multiple logistic regression.
+
+In Part 2, we go deeper:
+
+1. **Multiple logistic regression** with adjusted odds ratios for confounder control
+2. **Maximum likelihood estimation** and the Wald and likelihood ratio tests
+3. **Confidence intervals** for adjusted odds ratios
+4. **Interaction terms** in logistic regression and effect modification
+5. **Goodness-of-fit**: deviance, Hosmer-Lemeshow test, pseudo-R²
+6. **Model discrimination**: ROC curves and the area under the curve (AUC)
+7. **Diagnostics**: residuals, influential observations, and linearity in the logit
+
+**Textbook reference:** Kleinbaum et al., Chapter 22 (Sections 22.4 and 22.5)
+
+## Setup and Data
+
+```{r}
+#| label: load-packages
+library(tidyverse)
+library(brfssdata)
+library(knitr)
+library(kableExtra)
+library(broom)
+library(gtsummary)
+library(car)
+library(ggeffects)
+library(ResourceSelection)  # for Hosmer-Lemeshow
+library(pROC)               # for ROC/AUC
+library(performance)        # for model performance metrics
+```
+
+::: {.column-margin}
+BRFSS 2020 codebook: [CDC annual data page](https://www.cdc.gov/brfss/annual_data/annual_2020.html). Package documentation: [brfssdata](https://muntasirmasum.github.io/brfssdata/).
+:::
+
+::: {.data-card}
+[Data for this lecture]{.eyebrow}
+
+**BRFSS 2020, loaded with the brfssdata R package.** The first time you run the code below, `read_brfss()` downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. The code below repeats Part 1's recoding and sample, so this page uses the same 5,000 adults.
+
+Install the packages this lecture adds once with `install.packages(c("brfssdata", "janitor", "ResourceSelection", "pROC", "performance"))`.
+:::
+
+```{r}
+#| label: load-data
+# Read the ten BRFSS 2020 variables this lecture uses (CDC names;
+# names that start with an underscore need quotes)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+```
+
+The question about current smoking (`SMOKDAY2`) is asked only of people who have smoked at least 100 cigarettes in their life (`SMOKE100`). People who never reached 100 cigarettes are coded as former/never smokers rather than dropped.
+
+```{r}
+#| label: prepare-data
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+
+dim(brfss_logistic)
+```
+
+**Outcome:** `fmd`, frequent mental distress: a factor with levels No and Yes, where Yes means 14 or more mentally unhealthy days in the past 30.
+
+## Part 1: Multiple Logistic Regression
+
+### The Adjusted Model
+
+We extend the simple model to include several predictors:
+
+$$\text{logit}[\Pr(Y = 1)] = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \cdots + \beta_k X_k$$
+
+Each coefficient $\beta_j$ represents the change in log-odds for a one-unit increase in $X_j$, **holding all other predictors constant**. Exponentiating gives the **adjusted odds ratio**:
+
+$$\text{aOR}_j = e^{\beta_j}$$
+
+```{r}
+#| label: full-model
+mod_full <- glm(
+  fmd ~ exercise + smoker + age + sex + sleep_hrs + income_cat + bmi + physhlth_days,
+  data = brfss_logistic,
+  family = binomial(link = "logit")
+)
+
+mod_full |>
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      exercise      ~ "Exercise (past 30 days)",
+      smoker        ~ "Smoking status",
+      age           ~ "Age (per year)",
+      sex           ~ "Sex",
+      sleep_hrs     ~ "Sleep hours",
+      income_cat    ~ "Income category (per unit)",
+      bmi           ~ "BMI",
+      physhlth_days ~ "Physically unhealthy days"
+    )
+  ) |>
+  bold_labels() |>
+  bold_p() |>
+  as_kable_extra(escape = TRUE)
+```
+
+**Interpretation:** Each row gives the adjusted odds ratio (aOR) and 95% CI for one predictor, controlling for all others. For example, the aOR for current smoking compares the odds of frequent mental distress for current smokers vs. former/never smokers, after adjusting for age, sex, sleep, income, BMI, exercise, and physical health. An aOR > 1 indicates a risk factor; an aOR < 1 indicates a protective factor. Here current smokers have an aOR of `r or_text(mod_full, "smokerCurrent")`: `r odds_change(or_row(mod_full, "smokerCurrent")$estimate)` odds of FMD than former or never smokers with the same values of the other predictors.
+
+```{r}
+#| label: exercise-crude
+#| include: false
+crude_ex <- exp(coef(glm(fmd ~ exercise, data = brfss_logistic, family = binomial))[["exerciseYes"]])
+```
+
+Exercise, by contrast, has an aOR of `r or_text(mod_full, "exerciseYes")`, while its crude OR (Part 1) is `r f2(crude_ex)`. This model also adjusts for physically unhealthy days and BMI, which may lie on the path between exercise and mental distress, or affect who is able to exercise. Adjusting for such variables can weaken or even reverse an association, so whether to include them depends on their causal role; the Applications lecture takes this up.
+
+### Scaling Continuous Predictors
+
+A 1-year change in age or a 1-unit change in BMI is rarely the most clinically meaningful comparison. We can rescale to improve interpretation:
+
+```{r}
+#| label: rescaled-model
+mod_scaled <- glm(
+  fmd ~ exercise + smoker + I(age/10) + sex + sleep_hrs +
+        income_cat + I(bmi/5) + physhlth_days,
+  data = brfss_logistic,
+  family = binomial
+)
+
+mod_scaled |>
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      "I(age/10)"  ~ "Age (per 10 years)",
+      "I(bmi/5)"   ~ "BMI (per 5 units)"
+    )
+  ) |>
+  bold_labels() |>
+  as_kable_extra(escape = TRUE)
+```
+
+**Interpretation:** Now the aOR for age compares two individuals 10 years apart, and the aOR for BMI compares two individuals 5 BMI units apart, both more clinically interpretable.
+
+## Part 2: Maximum Likelihood Estimation and Hypothesis Tests
+
+### Maximum Likelihood Estimation (ML)
+
+Unlike linear regression, which uses ordinary least squares, logistic regression coefficients are estimated by **maximum likelihood**. The algorithm finds the values of $\beta_0, \beta_1, \ldots, \beta_k$ that maximize the likelihood of observing the data.
+
+The **likelihood function** for $n$ independent binary observations is:
+
+$$L(\boldsymbol{\beta}) = \prod_{i=1}^{n} p_i^{y_i}(1 - p_i)^{1 - y_i}$$
+
+where $p_i = \Pr(Y_i = 1 \mid X_i)$ is the predicted probability for observation $i$. Taking the log gives the **log-likelihood**:
+
+$$\ln L(\boldsymbol{\beta}) = \sum_{i=1}^{n} \left[y_i \ln p_i + (1 - y_i) \ln(1 - p_i)\right]$$
+
+The ML estimates $\hat{\beta}$ are obtained iteratively (typically by Newton-Raphson). We never compute these by hand, but it is important to know that R's `glm()` reports `Deviance` $= -2 \ln \hat{L}$, which is the foundation for hypothesis testing.
+
+### Wald Test (z-test for individual coefficients)
+
+The **Wald test** is the default test reported by `summary()` and `tidy()`. For each coefficient $\beta_j$:
+
+$$z = \frac{\hat{\beta}_j}{\text{SE}(\hat{\beta}_j)} \sim N(0, 1) \text{ under } H_0: \beta_j = 0$$
+
+The p-value tests whether the coefficient is significantly different from zero, equivalently whether the OR is significantly different from 1.
+
+```{r}
+#| label: wald-test
+tidy(mod_full, conf.int = TRUE, exponentiate = TRUE) |>
+  mutate(across(c(estimate, std.error, statistic, conf.low, conf.high),
+                \(x) round(x, 3)),
+         p.value = format.pval(p.value, digits = 3)) |>
+  # estimate is the OR; std.error and statistic are on the log-odds scale; the CIs are profile intervals
+  kable(caption = "Wald Tests for Each Coefficient (ORs with Profile 95% CIs)") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Caveat:** The Wald test can be unreliable when sample sizes are small or when coefficients are large. The likelihood ratio test is generally preferred for these situations.
+
+### Likelihood Ratio Test (LR test)
+
+The **likelihood ratio test** compares two nested models: a "full" model and a "reduced" model that drops one or more predictors. The test statistic is:
+
+$$\text{LR} = -2(\ln \hat{L}_{\text{reduced}} - \ln \hat{L}_{\text{full}}) = D_{\text{reduced}} - D_{\text{full}}$$
+
+Under $H_0$ that the dropped predictors have no effect, LR follows a $\chi^2$ distribution with degrees of freedom equal to the number of parameters dropped.
+
+#### Example: Test the joint contribution of smoking and exercise
+
+```{r}
+#| label: lr-test
+mod_reduced <- glm(
+  fmd ~ age + sex + sleep_hrs + income_cat + bmi + physhlth_days,
+  data = brfss_logistic,
+  family = binomial
+)
+
+lr_ex_smk <- anova(mod_reduced, mod_full, test = "LRT")
+
+lr_ex_smk |>
+  kable(digits = 3,
+        caption = "LR Test: Does adding exercise + smoker improve the model?") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** The LR test gives a $\chi^2$ statistic of `r f2(lr_ex_smk$Deviance[2])` on `r lr_ex_smk$Df[2]` degrees of freedom, one for each coefficient dropped: exercise and smoker each have two levels, so each adds one dummy variable. A small p-value means the dropped variables jointly contribute to model fit. Here `r fmt_p(lr_ex_smk[["Pr(>Chi)"]][2])`, so exercise and smoking `r if (lr_ex_smk[["Pr(>Chi)"]][2] < 0.05) "together improve the fit significantly" else "do not significantly improve the fit"`.
+
+#### Wald vs. LR test in practice
+
+| Aspect | Wald test | LR test |
+|--------|-----------|---------|
+| What it tests | Single coefficient or vector | Nested model comparison |
+| Computational cost | Very fast | Requires fitting two models |
+| Reliability with small samples | Less reliable | Generally preferred |
+| Reported by R | `summary(model)` | `anova(m1, m2, test = "LRT")` |
+
+In large samples (like ours with n = 5,000), the two tests usually agree. In smaller samples or with extreme estimates, prefer the LR test.
+
+## Part 3: Confidence Intervals for Adjusted Odds Ratios
+
+For the OR of a single coefficient, the 95% CI is computed on the **log-odds scale** and then exponentiated:
+
+$$95\% \text{ CI for } e^{\beta_j} = \exp\left(\hat{\beta}_j \pm 1.96 \cdot \text{SE}(\hat{\beta}_j)\right)$$
+
+This Wald interval is what `confint.default()` returns. `confint()` and `tidy(..., conf.int = TRUE)`, used for the tables on this page, give **profile-likelihood** intervals instead, which do not force the interval to be symmetric on the log-odds scale. The table below uses the profile intervals.
+
+```{r}
+#| label: ci-or
+term_names <- c(exerciseYes = "exercise", smokerCurrent = "current smoking", age = "age",
+                sexFemale = "female sex", sleep_hrs = "sleep hours", income_cat = "income",
+                bmi = "BMI", physhlth_days = "physically unhealthy days")
+
+ci_table <- tidy(mod_full, conf.int = TRUE, exponentiate = TRUE) |>
+  filter(term != "(Intercept)") |>
+  dplyr::select(term, estimate, conf.low, conf.high) |>
+  mutate(across(c(estimate, conf.low, conf.high), \(x) round(x, 3)))
+
+# Largest difference between Wald and profile limits (used in the text)
+wald_ci <- exp(confint.default(mod_full))[-1, ]
+prof_ci <- tidy(mod_full, conf.int = TRUE, exponentiate = TRUE)[-1, c("conf.low", "conf.high")]
+ci_diff <- max(abs(wald_ci - as.matrix(prof_ci)))
+
+ci_table |>
+  mutate(term = term_names[term]) |>
+  kable(col.names = c("Predictor", "aOR", "95% CI Lower", "95% CI Upper"),
+        caption = "Adjusted Odds Ratios with 95% CIs") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+In a sample this large the Wald and profile intervals agree closely: no limit differs by more than `r formatC(ci_diff, format = "f", digits = 3)` on the OR scale.
+
+### Forest Plot of Adjusted ORs
+
+A forest plot is the standard way to visualize multiple ORs and their CIs:
+
+```{r}
+#| label: forest-plot
+#| fig-alt: "Forest plot of adjusted odds ratios with 95% confidence intervals on a log-scale x-axis, with a dashed red reference line at 1. From largest to smallest: female sex about 1.8, current smoking about 1.5, exercise about 1.2 with an interval that crosses 1, physically unhealthy days and BMI just above 1, age just below 1, income about 0.90, and sleep hours about 0.83. Every interval except exercise lies entirely on one side of 1."
+ci_table |>
+  ggplot(aes(x = estimate, y = reorder(term_names[term], estimate))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  geom_point(size = 3, color = "steelblue") +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.2,
+                color = "steelblue", orientation = "y") +
+  scale_x_log10() +
+  labs(title = "Forest Plot of Adjusted Odds Ratios for Frequent Mental Distress",
+       subtitle = "Reference line at OR = 1; log-scale x-axis",
+       x = "Adjusted Odds Ratio (95% CI)", y = NULL) +
+  theme_minimal()
+```
+
+**Interpretation:** Predictors whose CIs do not cross the dashed line at OR = 1 are statistically significantly associated with FMD at the 0.05 level. The log-scale x-axis ensures that ORs of 0.5 and 2.0 (which represent equally strong associations in opposite directions) appear equidistant from 1.
+
+```{r}
+#| label: forest-text
+#| include: false
+excl <- ci_table$conf.low > 1 | ci_table$conf.high < 1
+```
+
+Here the CIs for `r knitr::combine_words(term_names[ci_table$term[excl]])` exclude 1`r if (any(!excl)) paste0("; the CI for ", knitr::combine_words(term_names[ci_table$term[!excl]]), " includes 1") else ""`.
+
+## Part 4: Interaction (Effect Modification)
+
+### What Is Interaction in Logistic Regression?
+
+Interaction (effect modification) occurs when the effect of one predictor on the outcome depends on the value of another predictor. In logistic regression, interaction is modeled by including a **product term**:
+
+$$\text{logit}[\Pr(Y=1)] = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \beta_3 (X_1 \cdot X_2)$$
+
+If $\beta_3 \neq 0$, the OR for $X_1$ depends on the value of $X_2$.
+
+#### Example: Does the effect of exercise differ by sex?
+
+```{r}
+#| label: interaction-model
+mod_interact <- glm(
+  fmd ~ exercise * sex + age + smoker + sleep_hrs + income_cat,
+  data = brfss_logistic,
+  family = binomial
+)
+
+mod_interact |>
+  tbl_regression(exponentiate = TRUE) |>
+  bold_labels() |>
+  bold_p() |>
+  as_kable_extra(escape = TRUE)
+```
+
+#### Testing the Interaction
+
+```{r}
+#| label: interaction-lr-test
+mod_no_interact <- glm(
+  fmd ~ exercise + sex + age + smoker + sleep_hrs + income_cat,
+  data = brfss_logistic,
+  family = binomial
+)
+
+lr_int <- anova(mod_no_interact, mod_interact, test = "LRT")
+
+lr_int |>
+  kable(digits = 3,
+        caption = "LR Test for Exercise × Sex Interaction") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** If the p-value for the LR test is small (< 0.05), the interaction is statistically significant: the effect of exercise differs by sex. If not, we can drop the interaction term and use the simpler main-effects model. Here the LR statistic is `r f2(lr_int$Deviance[2])` on `r lr_int$Df[2]` df (`r fmt_p(lr_int[["Pr(>Chi)"]][2])`), so `r if (lr_int[["Pr(>Chi)"]][2] < 0.05) "the association between exercise and FMD differs by sex" else "there is no evidence that the association between exercise and FMD differs by sex, and the main-effects model is preferred"`.
+
+### Visualizing the Interaction
+
+```{r}
+#| label: interaction-plot
+#| fig-alt: "Dot-and-interval plot of the predicted probability of FMD by exercise (No, Yes) and sex. Women are higher at both levels, about 16% without exercise and 13% with it; men are about 8% at both levels. The 95% intervals are wide, especially for adults who do not exercise."
+ggpredict(mod_interact, terms = c("exercise", "sex")) |>
+  plot() +
+  labs(title = "Predicted Probability of FMD by Exercise and Sex",
+       x = "Exercise", y = "Predicted Probability of FMD",
+       color = "Sex") +
+  theme_minimal()
+```
+
+```{r}
+#| label: interaction-text
+#| include: false
+pred_int <- as_tibble(ggpredict(mod_interact, terms = c("exercise", "sex")))
+pp <- function(ex, sx) f1(100 * pred_int$predicted[pred_int$x == ex & pred_int$group == sx])
+```
+
+**Interpretation:** Compare the change from No to Yes within each sex. If the change is the same on the log-odds scale (lines joining each sex's two points would be parallel on that scale), there is no interaction. If the lines would cross or diverge, the effect of exercise differs across sex. Here, with the other variables at their means or reference levels, the predicted probability of FMD is `r pp("No", "Male")`% without and `r pp("Yes", "Male")`% with exercise among men, and `r pp("No", "Female")`% and `r pp("Yes", "Female")`% among women.
+
+### Stratified Odds Ratios
+
+When an interaction is present, we report **stratum-specific** odds ratios rather than a single overall OR. `r if (lr_int[["Pr(>Chi)"]][2] >= 0.05) "The interaction here was not significant, so this table only shows how the calculation works; the main-effects OR is the one to report." else ""`
+
+```{r}
+#| label: stratified-or
+# Stratum-specific ORs from the interaction model
+ggpredict(mod_interact, terms = c("exercise", "sex")) |>
+  as_tibble() |>
+  pivot_wider(id_cols = group, names_from = x, values_from = predicted) |>
+  mutate(OR_yes_vs_no = (Yes / (1 - Yes)) / (No / (1 - No))) |>
+  dplyr::select(Sex = group, OR_yes_vs_no) |>
+  kable(digits = 3,
+        col.names = c("Sex", "OR (Exercise: Yes vs. No)"),
+        caption = "Stratum-Specific Odds Ratios for Exercise") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+## Part 5: Goodness-of-Fit
+
+### Deviance
+
+The **deviance** of a logistic model is:
+
+$$D = -2 \ln \hat{L}$$
+
+It is analogous to the residual sum of squares in linear regression: smaller is better. By itself, the deviance is hard to interpret, but **differences in deviance** between nested models follow a $\chi^2$ distribution and form the basis of the LR test.
+
+```{r}
+#| label: deviance
+glance(mod_full) |>
+  dplyr::select(null.deviance, df.null, deviance, df.residual, AIC, BIC) |>
+  kable(digits = 1, caption = "Model Fit Statistics") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Quick check:** The difference between `null.deviance` and `deviance` represents the improvement from adding all predictors to an intercept-only model. We can test this with an LR test on `df.null - df.residual` degrees of freedom.
+
+### Pseudo-R²
+
+There is no exact analog of $R^2$ for logistic regression, but several "pseudo-R²" measures exist. The most common is **McFadden's R²**:
+
+$$R^2_{\text{McFadden}} = 1 - \frac{\ln \hat{L}_{\text{full}}}{\ln \hat{L}_{\text{null}}}$$
+
+McFadden described values between 0.2 and 0.4 as an excellent fit.
+
+```{r}
+#| label: pseudo-r2
+r2_mf <- performance::r2_mcfadden(mod_full)
+r2_mf
+```
+
+**Interpretation:** McFadden's R² should not be interpreted on the same scale as linear regression R². Its values run much lower, so a value well below 0.2 does not mean the model is useless. Here it is `r formatC(r2_mf$R2, format = "f", digits = 3)`.
+
+### Hosmer-Lemeshow Test
+
+The **Hosmer-Lemeshow test** assesses the agreement between predicted and observed event rates within deciles of predicted probability. A **non-significant** p-value means the test found no evidence of lack of fit.
+
+```{r}
+#| label: hl-test
+hl_test <- hoslem.test(
+  x = as.numeric(brfss_logistic$fmd) - 1,
+  y = fitted(mod_full),
+  g = 10
+)
+
+hl_test
+```
+
+**Interpretation:** A small p-value (< 0.05) suggests that the model does not fit well in some regions of predicted probability. With large samples (like ours), the Hosmer-Lemeshow test can be over-powered and detect trivial misfit. Always pair it with a **calibration plot**. Here $\chi^2$ = `r f2(hl_test$statistic)` on `r hl_test$parameter` df (`r fmt_p(hl_test$p.value)`), so `r if (hl_test$p.value < 0.05) "the test detects lack of fit somewhere in the range of predicted probabilities" else "the test finds no evidence of lack of fit"`.
+
+### Calibration Plot
+
+```{r}
+#| label: calibration-plot
+#| fig-alt: "Calibration plot of the observed proportion with FMD against the mean predicted probability in 10 deciles, with a dashed red 45-degree line. Predictions run from about 3% to 43%. The points follow the line closely; the largest departures, about 3 percentage points above the line, are near predicted probabilities of 12% to 15%."
+calib <- brfss_logistic |>
+  mutate(pred_prob = fitted(mod_full),
+         obs_outcome = as.numeric(fmd) - 1,
+         decile = ntile(pred_prob, 10)) |>
+  summarise(
+    mean_pred = mean(pred_prob),
+    mean_obs  = mean(obs_outcome),
+    .by = decile
+  ) |>
+  arrange(decile)
+
+calib |>
+  ggplot(aes(x = mean_pred, y = mean_obs)) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  geom_point(size = 3, color = "steelblue") +
+  geom_line(color = "steelblue") +
+  labs(title = "Calibration Plot: Observed vs. Predicted Probability of FMD",
+       subtitle = "Points should fall on the dashed line for perfect calibration",
+       x = "Mean Predicted Probability (within decile)",
+       y = "Observed Proportion (within decile)") +
+  theme_minimal()
+```
+
+**Interpretation:** A well-calibrated model has points lying close to the 45-degree line. Systematic departures suggest miscalibration: points above the line indicate the model under-predicts; points below indicate over-prediction. Here the deciles' mean predicted probabilities run from `r f1(100 * min(calib$mean_pred))`% to `r f1(100 * max(calib$mean_pred))`%, and no decile's observed proportion is more than `r f1(100 * max(abs(calib$mean_obs - calib$mean_pred)))` percentage points from its mean prediction (the largest gap is in decile `r calib$decile[which.max(abs(calib$mean_obs - calib$mean_pred))]`).
+
+## Part 6: Discrimination, ROC Curve and AUC
+
+While calibration assesses how well predicted probabilities match observed rates, **discrimination** assesses how well the model separates events from non-events.
+
+The **ROC curve** plots sensitivity (true positive rate) against 1 − specificity (false positive rate) across all possible probability cutoffs.
+
+The **AUC** (area under the ROC curve) summarizes discrimination:
+
+| AUC | Discrimination |
+|-----|----------------|
+| 0.5 | No discrimination (chance) |
+| 0.5 to < 0.7 | Poor |
+| 0.7 to < 0.8 | Acceptable |
+| 0.8 to < 0.9 | Excellent |
+| ≥ 0.9 | Outstanding |
+
+```{r}
+#| label: roc-curve
+#| fig-alt: "ROC curve with sensitivity on the y-axis and specificity on the x-axis running from 1 to 0, plus a dashed red diagonal for chance. The curve rises steeply at first and stays well above the diagonal throughout; the subtitle gives AUC = 0.761."
+roc_obj <- roc(
+  response = brfss_logistic$fmd,
+  predictor = fitted(mod_full),
+  levels = c("No", "Yes"),
+  direction = "<"
+)
+
+auc_value <- auc(roc_obj)
+
+ggroc(roc_obj, color = "steelblue", linewidth = 1.2) +
+  geom_abline(slope = 1, intercept = 1, linetype = "dashed", color = "red") +
+  labs(title = "ROC Curve for Frequent Mental Distress Model",
+       subtitle = paste0("AUC = ", round(auc_value, 3)),
+       x = "Specificity", y = "Sensitivity") +
+  theme_minimal()
+```
+
+```{r}
+#| label: auc-band
+#| include: false
+auc_num <- as.numeric(auc_value)
+auc_band <- cut(auc_num, c(-Inf, 0.5, 0.7, 0.8, 0.9, Inf),
+                labels = c("no", "poor", "acceptable", "excellent", "outstanding"),
+                right = FALSE)
+```
+
+**Interpretation:** The AUC here is `r formatC(auc_num, format = "f", digits = 3)`, which the table above calls `r auc_band` discrimination: if we pick one adult with FMD and one without at random, the model gives the one with FMD the higher predicted probability `r round(100 * auc_num)`% of the time. Note that calibration and discrimination are distinct concepts: a model can have good discrimination but poor calibration, or vice versa.
+
+## Part 7: Diagnostics for Logistic Regression
+
+### Linearity in the Logit (for continuous predictors)
+
+For continuous predictors, logistic regression assumes a **linear relationship between the predictor and the log-odds**. Plotting the model's own predicted log-odds against age cannot check this: the model is linear in age by construction. Instead, we look at the **observed** log-odds (empirical logits) within groups of age, and then test whether a flexible spline for age fits better than the straight line.
+
+```{r}
+#| label: linearity-logit
+#| fig-alt: "Scatter plot of the observed log-odds of FMD in 10 age groups against the group's mean age (about 23 to 79 years), with a dashed orange straight-line fit. The log-odds fall from about -1.4 to about -2.7. The points sit near the line, a little above it between ages 50 and 70 and below it in the two oldest groups."
+# Observed log-odds of FMD within 10 equal-sized age groups
+emp_logit <- brfss_logistic |>
+  mutate(age_group = ntile(age, 10)) |>
+  summarise(mean_age = mean(age), p = mean(fmd == "Yes"), .by = age_group) |>
+  mutate(logit = log(p / (1 - p)))
+
+ggplot(emp_logit, aes(x = mean_age, y = logit)) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkorange", linetype = "dashed") +
+  geom_point(size = 3, color = "steelblue") +
+  labs(title = "Linearity in the Logit: Age",
+       subtitle = "Observed log-odds of FMD in 10 age groups; dashed line = straight-line fit",
+       x = "Mean age in group (years)", y = "Observed log-odds of FMD") +
+  theme_minimal()
+```
+
+```{r}
+#| label: linearity-spline
+# Adjusted check: replace the linear age term with a natural spline (3 df)
+mod_spline <- update(mod_full, . ~ . - age + splines::ns(age, df = 3))
+lr_spline <- anova(mod_full, mod_spline, test = "LRT")
+
+lr_spline |>
+  kable(digits = 3, caption = "LR Test: Spline vs. Linear Age") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Interpretation:** Points that scatter around a straight line support the linearity assumption; a clearly curved pattern suggests a quadratic term or a spline. The plot is unadjusted, so the spline test is the better guide: the spline model, which lets the log-odds bend with age while adjusting for the other predictors, `r if (lr_spline[["Pr(>Chi)"]][2] < 0.05) "fits significantly better" else "does not fit significantly better"` than the linear term (`r fmt_p(lr_spline[["Pr(>Chi)"]][2])`), `r if (lr_spline[["Pr(>Chi)"]][2] < 0.05) "so age should be modeled with a curve" else "so the linear age term is adequate"`.
+
+### Influential Observations
+
+Cook's distance and standardized residuals from logistic regression can be examined the same way as in linear regression:
+
+```{r}
+#| label: cooks-distance-logistic
+#| fig-alt: "Scatter plot of Cook's distance for each of the 5,000 observations against observation index, with a dashed red line at the 4/n threshold of 0.0008. Most points lie near 0; several hundred scattered points sit above the line, and the largest value is about 0.005."
+brfss_logistic |>
+  mutate(cooks_d = cooks.distance(mod_full),
+         row_id = row_number()) |>
+  ggplot(aes(x = row_id, y = cooks_d)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  geom_hline(yintercept = 4 / nrow(brfss_logistic),
+             linetype = "dashed", color = "red") +
+  labs(title = "Cook's Distance for Logistic Regression Model",
+       subtitle = "Red line: 4/n threshold",
+       x = "Observation Index", y = "Cook's Distance") +
+  theme_minimal()
+```
+
+```{r}
+#| label: cooks-text
+#| include: false
+cooks_d <- cooks.distance(mod_full)
+```
+
+Here `r sum(cooks_d > 4 / nrow(brfss_logistic))` observations (`r f1(100 * mean(cooks_d > 4 / nrow(brfss_logistic)))`%) are above the 4/n line, and the largest Cook's distance is `r formatC(max(cooks_d), format = "f", digits = 3)`, `r if (max(cooks_d) < 1) "far below 1, so no single observation dominates the fit" else "above 1, so that observation deserves a closer look"`.
+
+### Multicollinearity
+
+VIFs work the same way as in linear regression:
+
+```{r}
+#| label: vif-logistic
+vif_vals <- vif(mod_full)
+
+vif_vals |>
+  as.data.frame() |>
+  rownames_to_column("Predictor") |>
+  kable(digits = 2, col.names = c("Predictor", "VIF"), caption = "Variance Inflation Factors") |>
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+**Rule of thumb:** VIF > 5 (or 10) indicates problematic multicollinearity. Here the largest VIF is `r f2(max(vif_vals))` (`r names(which.max(vif_vals))`), `r if (max(vif_vals) < 5) "well below 5" else "above 5"`.
+
+## Part 8: Reporting Logistic Regression Results
+
+A publication-quality logistic regression table should include:
+
+1. **Sample size** and number of events
+2. **Adjusted odds ratios** with 95% CIs
+3. **p-values** for each coefficient
+4. **Model fit statistics** (AIC or pseudo-R²), which some journals leave out to keep the table short
+5. **Discrimination metric** (AUC), mainly when the paper is about prediction or methods
+
+```{r}
+#| label: final-table
+mod_full |>
+  tbl_regression(
+    exponentiate = TRUE,
+    label = list(
+      exercise      ~ "Exercise (past 30 days)",
+      smoker        ~ "Smoking status",
+      age           ~ "Age",
+      sex           ~ "Sex",
+      sleep_hrs     ~ "Sleep hours",
+      income_cat    ~ "Income category",
+      bmi           ~ "BMI",
+      physhlth_days ~ "Physically unhealthy days"
+    )
+  ) |>
+  add_glance_table(
+    include = everything(),
+    label = list(nobs ~ "N", AIC ~ "AIC", BIC ~ "BIC")
+  ) |>
+  bold_labels() |>
+  bold_p() |>
+  modify_caption("Adjusted Odds Ratios for Frequent Mental Distress, BRFSS 2020") |>
+  as_kable_extra(escape = TRUE)
+```
+
+## Summary
+
+| Concept | Tool / R function |
+|---------|-------------------|
+| Multiple logistic regression | `glm(y ~ x1 + x2 + ..., family = binomial)` |
+| Adjusted odds ratios | `tidy(model, exponentiate = TRUE)` |
+| Wald test | Default in `summary()` and `tidy()` |
+| Likelihood ratio test | `anova(reduced, full, test = "LRT")` |
+| Confidence intervals | `confint(model)` (profile CI) or `tidy(..., conf.int = TRUE)` |
+| Interaction | `glm(y ~ x1 * x2, ...)`; test with LR test |
+| Pseudo-R² | `performance::r2_mcfadden()` |
+| Hosmer-Lemeshow | `ResourceSelection::hoslem.test()` |
+| Calibration plot | Decile-based observed vs. predicted |
+| ROC curve / AUC | `pROC::roc()` and `pROC::auc()` |
+| Diagnostics | `cooks.distance()`, `vif()`, linearity plots |
+| Publication table | `gtsummary::tbl_regression()` |
+
+### Next Lecture
+
+- **Polytomous logistic regression**: outcomes with > 2 nominal categories
+- **Ordinal logistic regression**: outcomes with > 2 ordered categories
+- **Proportional odds assumption** and how to test it
+
+## References
+
+- Kleinbaum, D. G., Kupper, L. L., Nizam, A., & Rosenberg, E. S. (2013). *Applied Regression Analysis and Other Multivariable Methods* (5th ed.), Chapter 22.
+- Hosmer, D. W., Lemeshow, S., & Sturdivant, R. X. (2013). *Applied Logistic Regression* (3rd ed.). Wiley.
+- Steyerberg, E. W. (2019). *Clinical Prediction Models* (2nd ed.). Springer.
+
+## Part 9: In-Class Lab Activity
+
+### Instructions
+
+In this lab, you will build a multiple logistic regression model, conduct hypothesis tests, examine an interaction, and assess goodness-of-fit and discrimination. Use the same BRFSS 2020 logistic dataset from Part 1. Work through each task systematically. You may discuss concepts with classmates, but your written answers and R code must be your own.
+
+[Download the lab template (.qmd)](../labs/templates/template-logistic-part-2-lab.qmd){.btn .btn-sm .btn-outline-primary download="logistic-part-2-lab.qmd"}
+
+The template has the YAML header, the setup code below, and every task heading. Save it as `LastName_FirstName_Logistic_Part2_Lab.qmd`.
+
+**Submission:** render your file and upload the `.qmd` and the HTML to Brightspace by the end of class (see [Submitting your work](../resources/submitting-your-work.qmd)).
+
+### Data for the Lab
+
+The lab uses the same 5,000 adults as the lecture; the setup code below rebuilds them with brfssdata. The variables are:
+
+| Variable | Description | Type |
+|----------|-------------|------|
+| `fmd` | Frequent mental distress (No/Yes) | Factor (outcome) |
+| `menthlth_days` | Mentally unhealthy days (0--30) | Numeric |
+| `physhlth_days` | Physically unhealthy days (0--30) | Numeric |
+| `sleep_hrs` | Sleep hours per night (1--14) | Numeric |
+| `age` | Age in years (capped at 80) | Numeric |
+| `sex` | Sex (Male/Female) | Factor |
+| `bmi` | Body mass index | Numeric |
+| `exercise` | Exercised in past 30 days (No/Yes) | Factor |
+| `income_cat` | Household income category (1--8) | Numeric |
+| `smoker` | Former/Never vs. Current | Factor |
+
+```{r}
+#| label: lab-setup
+#| eval: false
+# Load packages
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(car)
+library(ggeffects)
+library(ResourceSelection)
+library(pROC)
+library(performance)
+
+options(gtsummary.use_ftExtra = TRUE)
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("MENTHLTH", "PHYSHLTH", "SLEPTIM1", "_AGE80", "SEXVAR", "_BMI5",
+           "EXERANY2", "INCOME2", "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+
+brfss_logistic <- brfss_full |>
+  mutate(
+    # Binary outcome: frequent mental distress (>= 14 days)
+    menthlth_days = case_when(
+      menthlth == 88                  ~ 0,
+      menthlth >= 1 & menthlth <= 30 ~ as.numeric(menthlth),
+      TRUE                           ~ NA_real_
+    ),
+    fmd = factor(
+      ifelse(menthlth_days >= 14, 1, 0),
+      levels = c(0, 1),
+      labels = c("No", "Yes")
+    ),
+    # Predictors
+    physhlth_days = case_when(
+      physhlth == 88                  ~ 0,
+      physhlth >= 1 & physhlth <= 30 ~ as.numeric(physhlth),
+      TRUE                           ~ NA_real_
+    ),
+    sleep_hrs = case_when(
+      sleptim1 >= 1 & sleptim1 <= 14 ~ as.numeric(sleptim1),
+      TRUE                           ~ NA_real_
+    ),
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(fmd), !is.na(physhlth_days), !is.na(sleep_hrs),
+    !is.na(age), age >= 18, !is.na(sex), !is.na(bmi),
+    !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_logistic <- brfss_logistic |>
+  dplyr::select(fmd, menthlth_days, physhlth_days, sleep_hrs, age, sex,
+                bmi, exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+### Task 1: Build a Multiple Logistic Regression Model (15 points)
+
+**1a. (5 pts)** Fit a multiple logistic regression model predicting `fmd` from at least 5 predictors of your choice.
+
+**1b. (5 pts)** Report the adjusted ORs with 95% CIs in a publication-quality table using `tbl_regression()`.
+
+**1c. (5 pts)** Interpret the adjusted OR for two predictors of your choice in 1-2 sentences each. Make sure to mention what the OR represents (per unit change for continuous; reference category for categorical).
+
+### Task 2: Wald and Likelihood Ratio Tests (15 points)
+
+**2a. (5 pts)** Identify the Wald p-value for each predictor in your model from the `tidy()` or `summary()` output.
+
+**2b. (5 pts)** Fit a reduced model that drops one predictor of your choice. Perform a likelihood ratio test comparing the full and reduced models using `anova(reduced, full, test = "LRT")`.
+
+**2c. (5 pts)** Compare the conclusions from the Wald test (for the dropped predictor) and the LR test. Do they agree? In 2-3 sentences, explain when the two tests might disagree.
+
+### Task 3: Test an Interaction (20 points)
+
+**3a. (5 pts)** Fit a model that includes an interaction between two predictors of your choice (e.g., `exercise * sex` or `smoker * age`).
+
+**3b. (5 pts)** Perform a likelihood ratio test comparing the model with the interaction to the model without it.
+
+**3c. (5 pts)** Create a visualization of the interaction using `ggpredict()` and `plot()`.
+
+**3d. (5 pts)** In 3-4 sentences, interpret the interaction. Does the effect of one predictor differ across levels of the other? If statistically significant, report the stratum-specific odds ratios.
+
+### Task 4: Goodness-of-Fit and Discrimination (25 points)
+
+**4a. (5 pts)** Compute McFadden's pseudo-R² for your full model using `performance::r2_mcfadden()`.
+
+**4b. (5 pts)** Perform the Hosmer-Lemeshow goodness-of-fit test using `ResourceSelection::hoslem.test()`. Report the test statistic and p-value. Comment on the interpretation given your sample size.
+
+**4c. (5 pts)** Create a calibration plot showing observed vs. predicted probabilities by decile. Comment on whether the model appears well calibrated.
+
+**4d. (10 pts)** Compute and plot the ROC curve using `pROC::roc()`. Report the AUC. Based on the AUC value, how would you describe the model's discrimination ability (poor, acceptable, excellent, outstanding)?
+
+**Completion credit (25 points):** Awarded for a complete, good-faith attempt at all tasks. Total: 75 + 25 = 100 points.
+
+::: {.callout-note collapse="true"}
+## Session info
+
+```{r}
+#| label: session-info
+#| echo: false
+# Print session info with the home folder shortened to ~
+cat(gsub(path.expand("~"), "~", capture.output(sessionInfo()), fixed = TRUE), sep = "\n")
+```
+:::
