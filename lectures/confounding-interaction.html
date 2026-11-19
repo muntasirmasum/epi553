@@ -471,6 +471,30 @@ window.Quarto = {
  <span class="menu-text">Regression Diagnostics</span></a>
   </div>
 </li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-part-1.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression, Part 1</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-part-2.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression, Part 2</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/polytomous-ordinal.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Polytomous and Ordinal Logistic Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-applications.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression Applications</span></a>
+  </div>
+</li>
       </ul>
 </li>
         <li class="sidebar-item sidebar-item-section">
@@ -622,7 +646,7 @@ window.Quarto = {
     <div>
     <div class="quarto-title-meta-heading">Modified</div>
     <div class="quarto-title-meta-contents">
-      <p class="date-modified">November 16, 2026</p>
+      <p class="date-modified">November 19, 2026</p>
     </div>
   </div>
     
@@ -872,7 +896,7 @@ window.Quarto = {
 <span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">bold_labels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">italicize_levels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/modify_caption.html">modify_caption</a></span><span class="op">(</span><span class="st">"Table 1. Descriptive statistics, BRFSS 2020 (n = 5,000)"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span>escape <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details><div class="cell-output-display">
 <table class="table caption-top table-sm table-striped small">
 <caption>Table 1. Descriptive statistics, BRFSS 2020 (n = 5,000)</caption>
@@ -883,92 +907,92 @@ window.Quarto = {
 </tr></thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Physically unhealthy days (past 30)</span></td>
+<td style="text-align: left; font-weight: bold;">Physically unhealthy days (past 30)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">3.4 (7.9)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><span style="font-weight: bold;">Sleep (hours/night)</span></td>
+<td style="text-align: left; font-weight: bold;">Sleep (hours/night)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">7.1 (1.4)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Age (years)</span></td>
+<td style="text-align: left; font-weight: bold;">Age (years)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">54.1 (17.0)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><span style="font-weight: bold;">Sex</span></td>
+<td style="text-align: left; font-weight: bold;">Sex</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;"></td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Male</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Male</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">2,291 (46%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Female</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Female</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">2,709 (54%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Education level</span></td>
+<td style="text-align: left; font-weight: bold;">Education level</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;"></td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Less than HS</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Less than HS</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">276 (5.5%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">HS graduate</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">HS graduate</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">1,263 (25%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Some college</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Some college</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">1,378 (28%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">College graduate</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">College graduate</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">2,083 (42%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><span style="font-weight: bold;">Any physical activity (past 30 days)</span></td>
+<td style="text-align: left; font-weight: bold;">Any physical activity (past 30 days)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">3,929 (79%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">General health status</span></td>
+<td style="text-align: left; font-weight: bold;">General health status</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;"></td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Excellent</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Excellent</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">1,031 (21%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Very good</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Very good</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">1,762 (35%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Good</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Good</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">1,507 (30%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Fair</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Fair</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">524 (10%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Poor</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Poor</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">176 (3.5%)</td>
 </tr>

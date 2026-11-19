@@ -29,7 +29,11 @@
       "/lectures/dummy-variables.html",
       "/lectures/confounding-interaction.html",
       "/lectures/model-selection.html",
-      "/lectures/diagnostics.html"
+      "/lectures/diagnostics.html",
+      "/lectures/logistic-part-1.html",
+      "/lectures/logistic-part-2.html",
+      "/lectures/polytomous-ordinal.html",
+      "/lectures/logistic-applications.html"
     ]
   }
 ]

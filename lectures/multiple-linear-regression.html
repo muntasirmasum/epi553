@@ -474,6 +474,30 @@ window.Quarto = {
  <span class="menu-text">Regression Diagnostics</span></a>
   </div>
 </li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-part-1.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression, Part 1</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-part-2.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression, Part 2</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/polytomous-ordinal.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Polytomous and Ordinal Logistic Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-applications.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression Applications</span></a>
+  </div>
+</li>
       </ul>
 </li>
         <li class="sidebar-item sidebar-item-section">
@@ -625,7 +649,7 @@ window.Quarto = {
     <div>
     <div class="quarto-title-meta-heading">Modified</div>
     <div class="quarto-title-meta-contents">
-      <p class="date-modified">November 16, 2026</p>
+      <p class="date-modified">November 19, 2026</p>
     </div>
   </div>
     
@@ -818,7 +842,7 @@ window.Quarto = {
 <span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">bold_labels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">italicize_levels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/modify_caption.html">modify_caption</a></span><span class="op">(</span><span class="st">"Table 1. Descriptive statistics, BRFSS 2020 analytic sample (n = 5,000)"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span>escape <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details><div class="cell-output-display">
 <table class="table caption-top table-sm table-striped small">
 <caption>Table 1. Descriptive statistics, BRFSS 2020 analytic sample (n = 5,000)</caption>
@@ -829,87 +853,87 @@ window.Quarto = {
 </tr></thead>
 <tbody>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Mentally unhealthy days (past 30)</span></td>
+<td style="text-align: left; font-weight: bold;">Mentally unhealthy days (past 30)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">3.8 (7.7)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><span style="font-weight: bold;">Physically unhealthy days (past 30)</span></td>
+<td style="text-align: left; font-weight: bold;">Physically unhealthy days (past 30)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">3.3 (7.8)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Sleep (hours/night)</span></td>
+<td style="text-align: left; font-weight: bold;">Sleep (hours/night)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">7.1 (1.3)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><span style="font-weight: bold;">Age (years)</span></td>
+<td style="text-align: left; font-weight: bold;">Age (years)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">54.3 (17.2)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Household income</span></td>
+<td style="text-align: left; font-weight: bold;">Household income</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;"></td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">&amp;lt;$10k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">&lt;$10k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">190 (3.8%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">$10-15k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">$10-15k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">169 (3.4%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">$15-20k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">$15-20k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">312 (6.2%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">$20-25k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">$20-25k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">434 (8.7%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">$25-35k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">$25-35k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">489 (9.8%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">$35-50k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">$35-50k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">683 (14%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">$50-75k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">$50-75k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">841 (17%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">&amp;gt;$75k</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">&gt;$75k</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">1,882 (38%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left;"><span style="font-weight: bold;">Sex</span></td>
+<td style="text-align: left; font-weight: bold;">Sex</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;"></td>
 </tr>
 <tr class="odd">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Male</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Male</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">2,331 (47%)</td>
 </tr>
 <tr class="even">
-<td style="text-align: left; padding-left: 2em;" data-indentlevel="1"><span style="font-style: italic;">Female</span></td>
+<td style="text-align: left; font-style: italic; padding-left: 2em;" data-indentlevel="1">Female</td>
 <td style="text-align: center;"></td>
 <td style="text-align: center;">2,669 (53%)</td>
 </tr>
 <tr class="odd">
-<td style="text-align: left;"><span style="font-weight: bold;">Any physical activity (past 30 days)</span></td>
+<td style="text-align: left; font-weight: bold;">Any physical activity (past 30 days)</td>
 <td style="text-align: center;">5,000</td>
 <td style="text-align: center;">3,874 (77%)</td>
 </tr>
@@ -937,7 +961,7 @@ window.Quarto = {
 <span><span class="fu"><a href="https://rdrr.io/pkg/plotly/man/ggplotly.html">ggplotly</a></span><span class="op">(</span><span class="va">p_hist</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </details><div class="cell-output-display">
 <div class="plotly html-widget html-fill-item" id="htmlwidget-ba6b2226178873b086ed" style="width:100%;height:406px;"></div>
-<script type="application/json" data-for="htmlwidget-ba6b2226178873b086ed">{"x":{"data":[{"orientation":"v","width":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"base":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"x":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"y":[3196,122,281,172,80,255,29,92,8,2,154,1,11,2,39,156,1,4,4,0,91,9,1,0,2,35,0,0,11,4,238],"text":["count: 3196<br />menthlth_days:  0","count:  122<br />menthlth_days:  1","count:  281<br />menthlth_days:  2","count:  172<br />menthlth_days:  3","count:   80<br />menthlth_days:  4","count:  255<br />menthlth_days:  5","count:   29<br />menthlth_days:  6","count:   92<br />menthlth_days:  7","count:    8<br />menthlth_days:  8","count:    2<br />menthlth_days:  9","count:  154<br />menthlth_days: 10","count:    1<br />menthlth_days: 11","count:   11<br />menthlth_days: 12","count:    2<br />menthlth_days: 13","count:   39<br />menthlth_days: 14","count:  156<br />menthlth_days: 15","count:    1<br />menthlth_days: 16","count:    4<br />menthlth_days: 17","count:    4<br />menthlth_days: 18","count:    0<br />menthlth_days: 19","count:   91<br />menthlth_days: 20","count:    9<br />menthlth_days: 21","count:    1<br />menthlth_days: 22","count:    0<br />menthlth_days: 23","count:    2<br />menthlth_days: 24","count:   35<br />menthlth_days: 25","count:    0<br />menthlth_days: 26","count:    0<br />menthlth_days: 27","count:   11<br />menthlth_days: 28","count:    4<br />menthlth_days: 29","count:  238<br />menthlth_days: 30"],"type":"bar","textposition":"none","marker":{"autocolorscale":false,"color":"rgba(70,130,180,0.85)","line":{"width":1.8897637795275593,"color":"rgba(255,255,255,1)"}},"showlegend":false,"xaxis":"x","yaxis":"y","hoverinfo":"text","frame":null}],"layout":{"margin":{"t":45.356579493565796,"r":8.6342880863428828,"b":44.034869240348698,"l":57.84973017849731},"paper_bgcolor":"rgba(255,255,255,1)","font":{"color":"rgba(0,0,0,1)","family":"","size":17.268576172685762},"title":{"text":"Distribution of Mentally Unhealthy Days in the Past 30 Days","font":{"color":"rgba(0,0,0,1)","family":"","size":20.722291407222912},"x":0,"xref":"paper"},"xaxis":{"domain":[0,1],"automargin":true,"type":"linear","autorange":false,"range":[-2.0499999999999998,32.049999999999997],"tickmode":"array","ticktext":["0","10","20","30"],"tickvals":[0,10,20,29.999999999999996],"categoryorder":"array","categoryarray":["0","10","20","30"],"nticks":null,"ticks":"","tickcolor":null,"ticklen":4.3171440431714405,"tickwidth":0,"showticklabels":true,"tickfont":{"color":"rgba(77,77,77,1)","family":"","size":13.814860938148611},"tickangle":-0,"showline":false,"linecolor":null,"linewidth":0,"showgrid":true,"gridcolor":"rgba(235,235,235,1)","gridwidth":0.78493528057662576,"zeroline":false,"anchor":"y","title":{"text":"Number of Mentally Unhealthy Days","font":{"color":"rgba(0,0,0,1)","family":"","size":17.268576172685762}},"hoverformat":".2f"},"yaxis":{"domain":[0,1],"automargin":true,"type":"linear","autorange":false,"range":[-159.80000000000001,3355.8000000000002],"tickmode":"array","ticktext":["0","1000","2000","3000"],"tickvals":[0,1000,2000.0000000000002,3000],"categoryorder":"array","categoryarray":["0","1000","2000","3000"],"nticks":null,"ticks":"","tickcolor":null,"ticklen":4.3171440431714414,"tickwidth":0,"showticklabels":true,"tickfont":{"color":"rgba(77,77,77,1)","family":"","size":13.814860938148611},"tickangle":-0,"showline":false,"linecolor":null,"linewidth":0,"showgrid":true,"gridcolor":"rgba(235,235,235,1)","gridwidth":0.78493528057662576,"zeroline":false,"anchor":"x","title":{"text":"Count","font":{"color":"rgba(0,0,0,1)","family":"","size":17.268576172685762}},"hoverformat":".2f"},"shapes":[],"showlegend":false,"legend":{"bgcolor":null,"bordercolor":null,"borderwidth":0,"font":{"color":"rgba(0,0,0,1)","family":"","size":13.814860938148611}},"hovermode":"closest","barmode":"relative"},"config":{"doubleClick":"reset","modeBarButtonsToAdd":["hoverclosest","hovercompare"],"showSendToCloud":false},"source":"A","attrs":{"34824bc13846":{"x":{},"type":"bar"}},"cur_data":"34824bc13846","visdat":{"34824bc13846":["function (y) ","x"]},"highlight":{"on":"plotly_click","persistent":false,"dynamic":false,"selectize":false,"opacityDim":0.20000000000000001,"selected":{"opacity":1},"debounce":0},"shinyEvents":["plotly_hover","plotly_click","plotly_selected","plotly_relayout","plotly_brushed","plotly_brushing","plotly_clickannotation","plotly_doubleclick","plotly_deselect","plotly_afterplot","plotly_sunburstclick"],"base_url":"https://plot.ly"},"evals":[],"jsHooks":[]}</script><p>Distribution of Mentally Unhealthy Days (BRFSS 2020)</p>
+<script type="application/json" data-for="htmlwidget-ba6b2226178873b086ed">{"x":{"data":[{"orientation":"v","width":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"base":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"x":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],"y":[3196,122,281,172,80,255,29,92,8,2,154,1,11,2,39,156,1,4,4,0,91,9,1,0,2,35,0,0,11,4,238],"text":["count: 3196<br />menthlth_days:  0","count:  122<br />menthlth_days:  1","count:  281<br />menthlth_days:  2","count:  172<br />menthlth_days:  3","count:   80<br />menthlth_days:  4","count:  255<br />menthlth_days:  5","count:   29<br />menthlth_days:  6","count:   92<br />menthlth_days:  7","count:    8<br />menthlth_days:  8","count:    2<br />menthlth_days:  9","count:  154<br />menthlth_days: 10","count:    1<br />menthlth_days: 11","count:   11<br />menthlth_days: 12","count:    2<br />menthlth_days: 13","count:   39<br />menthlth_days: 14","count:  156<br />menthlth_days: 15","count:    1<br />menthlth_days: 16","count:    4<br />menthlth_days: 17","count:    4<br />menthlth_days: 18","count:    0<br />menthlth_days: 19","count:   91<br />menthlth_days: 20","count:    9<br />menthlth_days: 21","count:    1<br />menthlth_days: 22","count:    0<br />menthlth_days: 23","count:    2<br />menthlth_days: 24","count:   35<br />menthlth_days: 25","count:    0<br />menthlth_days: 26","count:    0<br />menthlth_days: 27","count:   11<br />menthlth_days: 28","count:    4<br />menthlth_days: 29","count:  238<br />menthlth_days: 30"],"type":"bar","textposition":"none","marker":{"autocolorscale":false,"color":"rgba(70,130,180,0.85)","line":{"width":1.8897637795275593,"color":"rgba(255,255,255,1)"}},"showlegend":false,"xaxis":"x","yaxis":"y","hoverinfo":"text","frame":null}],"layout":{"margin":{"t":45.356579493565796,"r":8.6342880863428828,"b":44.034869240348698,"l":57.84973017849731},"paper_bgcolor":"rgba(255,255,255,1)","font":{"color":"rgba(0,0,0,1)","family":"","size":17.268576172685762},"title":{"text":"Distribution of Mentally Unhealthy Days in the Past 30 Days","font":{"color":"rgba(0,0,0,1)","family":"","size":20.722291407222912},"x":0,"xref":"paper"},"xaxis":{"domain":[0,1],"automargin":true,"type":"linear","autorange":false,"range":[-2.0499999999999998,32.049999999999997],"tickmode":"array","ticktext":["0","10","20","30"],"tickvals":[0,10,20,29.999999999999996],"categoryorder":"array","categoryarray":["0","10","20","30"],"nticks":null,"ticks":"","tickcolor":null,"ticklen":4.3171440431714405,"tickwidth":0,"showticklabels":true,"tickfont":{"color":"rgba(77,77,77,1)","family":"","size":13.814860938148611},"tickangle":-0,"showline":false,"linecolor":null,"linewidth":0,"showgrid":true,"gridcolor":"rgba(235,235,235,1)","gridwidth":0.78493528057662576,"zeroline":false,"anchor":"y","title":{"text":"Number of Mentally Unhealthy Days","font":{"color":"rgba(0,0,0,1)","family":"","size":17.268576172685762}},"hoverformat":".2f"},"yaxis":{"domain":[0,1],"automargin":true,"type":"linear","autorange":false,"range":[-159.80000000000001,3355.8000000000002],"tickmode":"array","ticktext":["0","1000","2000","3000"],"tickvals":[0,1000,2000.0000000000002,3000],"categoryorder":"array","categoryarray":["0","1000","2000","3000"],"nticks":null,"ticks":"","tickcolor":null,"ticklen":4.3171440431714414,"tickwidth":0,"showticklabels":true,"tickfont":{"color":"rgba(77,77,77,1)","family":"","size":13.814860938148611},"tickangle":-0,"showline":false,"linecolor":null,"linewidth":0,"showgrid":true,"gridcolor":"rgba(235,235,235,1)","gridwidth":0.78493528057662576,"zeroline":false,"anchor":"x","title":{"text":"Count","font":{"color":"rgba(0,0,0,1)","family":"","size":17.268576172685762}},"hoverformat":".2f"},"shapes":[],"showlegend":false,"legend":{"bgcolor":null,"bordercolor":null,"borderwidth":0,"font":{"color":"rgba(0,0,0,1)","family":"","size":13.814860938148611}},"hovermode":"closest","barmode":"relative"},"config":{"doubleClick":"reset","modeBarButtonsToAdd":["hoverclosest","hovercompare"],"showSendToCloud":false},"source":"A","attrs":{"e04f38011e9e":{"x":{},"type":"bar"}},"cur_data":"e04f38011e9e","visdat":{"e04f38011e9e":["function (y) ","x"]},"highlight":{"on":"plotly_click","persistent":false,"dynamic":false,"selectize":false,"opacityDim":0.20000000000000001,"selected":{"opacity":1},"debounce":0},"shinyEvents":["plotly_hover","plotly_click","plotly_selected","plotly_relayout","plotly_brushed","plotly_brushing","plotly_clickannotation","plotly_doubleclick","plotly_deselect","plotly_afterplot","plotly_sunburstclick"],"base_url":"https://plot.ly"},"evals":[],"jsHooks":[]}</script><p>Distribution of Mentally Unhealthy Days (BRFSS 2020)</p>
 </div>
 </div>
 <p><span class="visually-hidden">Figure description: histogram of mentally unhealthy days for the 5,000 adults. The tallest bar by far is at 0 days (64% of the sample); smaller spikes appear at round numbers such as 5, 10, 15, and 20, and at 30 days (5%).</span></p>

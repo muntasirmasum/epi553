@@ -1,0 +1,2372 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.11.9">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<meta name="author" content="Muntasir Masum">
+<meta name="description" content="A model-building strategy worked through on BRFSS 2020: Table 1, univariable screening, the multivariable model, confounding, effect modification, fit checks, a forest plot, and a publication-ready paragraph.">
+<title>Logistic Regression Applications – EPI 553</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<link href="../labs/index.html" rel="next">
+<link href="../lectures/polytomous-ordinal.html" rel="prev">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/scrollable-regions/scrollable-regions.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e3439a48adf406c40d4e30bd1f057d94.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-dark-77cbe4bd012c4bebbd27c2fdd81f2e32.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e3439a48adf406c40d4e30bd1f057d94.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-b1be5088465bd82645b2be39a9ad7d8e.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-dark-e4ce715e4ca00a5a13fa66d8f81e7f30.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="../site_libs/bootstrap/bootstrap-b1be5088465bd82645b2be39a9ad7d8e.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="light">
+<script src="../site_libs/quarto-contrib/glightbox/glightbox.min.js"></script>
+<link href="../site_libs/quarto-contrib/glightbox/glightbox.min.css" rel="stylesheet">
+<link href="../site_libs/quarto-contrib/glightbox/lightbox.css" rel="stylesheet"><script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script><style>html{ scroll-behavior: smooth; }</style>
+<script src="../site_libs/kePrint-0.0.1/kePrint.js"></script><link href="../site_libs/lightable-0.0.1/lightable.css" rel="stylesheet">
+</head>
+<body class="nav-sidebar docked nav-fixed slimcontent quarto-light"><a id="quarto-skip-link" class="visually-hidden-focusable" href="#quarto-document-content">Skip to main content</a><script id="quarto-html-before-body" type="application/javascript">
+    const toggleBodyColorMode = (bsSheetEl) => {
+      const mode = bsSheetEl.getAttribute("data-mode");
+      const bodyEl = window.document.querySelector("body");
+      if (mode === "dark") {
+        bodyEl.classList.add("quarto-dark");
+        bodyEl.classList.remove("quarto-light");
+      } else {
+        bodyEl.classList.add("quarto-light");
+        bodyEl.classList.remove("quarto-dark");
+      }
+    }
+    const toggleBodyColorPrimary = () => {
+      const bsSheetEl = window.document.querySelector("link#quarto-bootstrap:not([rel=disabled-stylesheet])");
+      if (bsSheetEl) {
+        toggleBodyColorMode(bsSheetEl);
+      }
+    }
+    const setColorSchemeToggle = (alternate) => {
+      const toggles = window.document.querySelectorAll('.quarto-color-scheme-toggle');
+      for (let i=0; i < toggles.length; i++) {
+        const toggle = toggles[i];
+        if (toggle) {
+          toggle.setAttribute("aria-checked", alternate ? "true" : "false");
+          if (alternate) {
+            toggle.classList.add("alternate");
+          } else {
+            toggle.classList.remove("alternate");
+          }
+        }
+      }
+    };
+    const toggleColorMode = (alternate) => {
+      // Switch the stylesheets
+      const primaryStylesheets = window.document.querySelectorAll('link.quarto-color-scheme:not(.quarto-color-alternate)');
+      const alternateStylesheets = window.document.querySelectorAll('link.quarto-color-scheme.quarto-color-alternate');
+      manageTransitions('#quarto-margin-sidebar .nav-link', false);
+      if (alternate) {
+        // note: dark is layered on light, we don't disable primary!
+        enableStylesheet(alternateStylesheets);
+        for (const sheetNode of alternateStylesheets) {
+          if (sheetNode.id === "quarto-bootstrap") {
+            toggleBodyColorMode(sheetNode);
+          }
+        }
+      } else {
+        disableStylesheet(alternateStylesheets);
+        enableStylesheet(primaryStylesheets)
+        toggleBodyColorPrimary();
+      }
+      manageTransitions('#quarto-margin-sidebar .nav-link', true);
+      // Switch the toggles
+      setColorSchemeToggle(alternate)
+    }
+    // Hack to workaround the fact that safari doesn't
+    // properly recolor the scrollbar when toggling (#1455).
+    // Not run on load: stylesheets are set before first paint there, and
+    // scrolling would undo the scroll to a URL fragment (#14973).
+    // The one pixel nudge keeps the reader where they were.
+    const refreshSafariScrollbar = () => {
+      if (navigator.userAgent.indexOf('Safari') > 0 && navigator.userAgent.indexOf('Chrome') == -1) {
+        manageTransitions("body", false);
+        const scrollY = window.scrollY;
+        window.scrollTo(0, scrollY > 0 ? scrollY - 1 : 1);
+        setTimeout(() => {
+          window.scrollTo(0, scrollY);
+          manageTransitions("body", true);
+        }, 40);
+      }
+    }
+    const disableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        stylesheet.rel = 'disabled-stylesheet';
+      }
+    }
+    const enableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        if(stylesheet.rel !== 'stylesheet') { // for Chrome, which will still FOUC without this check
+          stylesheet.rel = 'stylesheet';
+        }
+      }
+    }
+    const manageTransitions = (selector, allowTransitions) => {
+      const els = window.document.querySelectorAll(selector);
+      for (let i=0; i < els.length; i++) {
+        const el = els[i];
+        if (allowTransitions) {
+          el.classList.remove('notransition');
+        } else {
+          el.classList.add('notransition');
+        }
+      }
+    }
+    const isFileUrl = () => {
+      return window.location.protocol === 'file:';
+    }
+    const hasAlternateSentinel = () => {
+      let styleSentinel = getColorSchemeSentinel();
+      if (styleSentinel !== null) {
+        return styleSentinel === "alternate";
+      } else {
+        return false;
+      }
+    }
+    const setStyleSentinel = (alternate) => {
+      const value = alternate ? "alternate" : "default";
+      if (!isFileUrl()) {
+        window.localStorage.setItem("quarto-color-scheme", value);
+      } else {
+        localAlternateSentinel = value;
+      }
+    }
+    const getColorSchemeSentinel = () => {
+      if (!isFileUrl()) {
+        const storageValue = window.localStorage.getItem("quarto-color-scheme");
+        return storageValue != null ? storageValue : localAlternateSentinel;
+      } else {
+        return localAlternateSentinel;
+      }
+    }
+    const toggleGiscusIfUsed = (isAlternate, darkModeDefault) => {
+      const baseTheme = document.querySelector('#giscus-base-theme')?.value ?? 'light';
+      const alternateTheme = document.querySelector('#giscus-alt-theme')?.value ?? 'dark';
+      let newTheme = '';
+      if(authorPrefersDark) {
+        newTheme = isAlternate ? baseTheme : alternateTheme;
+      } else {
+        newTheme = isAlternate ? alternateTheme : baseTheme;
+      }
+      const changeGiscusTheme = () => {
+        // From: https://github.com/giscus/giscus/issues/336
+        const sendMessage = (message) => {
+          const iframe = document.querySelector('iframe.giscus-frame');
+          if (!iframe) return;
+          iframe.contentWindow.postMessage({ giscus: message }, 'https://giscus.app');
+        }
+        sendMessage({
+          setConfig: {
+            theme: newTheme
+          }
+        });
+      }
+      const isGiscussLoaded = window.document.querySelector('iframe.giscus-frame') !== null;
+      if (isGiscussLoaded) {
+        changeGiscusTheme();
+      }
+    };
+    const authorPrefersDark = false;
+    const queryPrefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+    const darkModeDefault = queryPrefersDark.matches;
+      document.querySelector('link#quarto-text-highlighting-styles.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+      document.querySelector('link#quarto-bootstrap.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+    let localAlternateSentinel = darkModeDefault ? 'alternate' : 'default';
+    // Dark / light mode switch
+    window.quartoToggleColorScheme = () => {
+      // Read the current dark / light value
+      let toAlternate = !hasAlternateSentinel();
+      toggleColorMode(toAlternate);
+      refreshSafariScrollbar();
+      setStyleSentinel(toAlternate);
+      toggleGiscusIfUsed(toAlternate, darkModeDefault);
+      window.dispatchEvent(new Event('resize'));
+    };
+    queryPrefersDark.addEventListener("change", e => {
+      if(window.localStorage.getItem("quarto-color-scheme") !== null)
+        return;
+      const alternate = e.matches
+      toggleColorMode(alternate);
+      refreshSafariScrollbar();
+      localAlternateSentinel = e.matches ? 'alternate' : 'default'; // this is used alongside local storage!
+      toggleGiscusIfUsed(alternate, darkModeDefault);
+    });
+    // Switch to dark mode if need be
+    if (hasAlternateSentinel()) {
+      toggleColorMode(true);
+    } else {
+      toggleColorMode(false);
+    }
+  </script>
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top"><nav class="navbar navbar-expand-lg " data-bs-theme="dark" aria-label="Site"><div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../index.html">
+    <span class="navbar-title">EPI 553</span>
+    </a>
+  </div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+<li class="nav-item">
+    <a class="nav-link active" href="../index.html" aria-current="page"> 
+<span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../lectures/index.html"> 
+<span class="menu-text">Lectures</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../labs/index.html"> 
+<span class="menu-text">Labs</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../resources/index.html"> 
+<span class="menu-text">Resources</span></a>
+  </li>  
+</ul>
+<ul class="navbar-nav navbar-nav-scroll ms-auto">
+<li class="nav-item">
+    <a class="nav-link" href="https://muntasirmasum.com/teaching.html"> 
+<span class="menu-text">muntasirmasum.com</span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/muntasirmasum/epi553"> <i class="bi bi-github" role="img" aria-label="Source on GitHub">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+</div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+  <button type="button" role="switch" aria-checked="false" class="quarto-color-scheme-toggle quarto-navigation-tool  px-1" onclick="window.quartoToggleColorScheme(); return false;" title="Toggle dark mode" aria-label="Toggle dark mode"><i class="bi"></i></button>
+</div>
+            <div id="quarto-search" class="" title="Search"></div>
+      </div> <!-- /container-fluid -->
+    </nav><nav class="quarto-secondary-nav" aria-label="Toolbar"><div class="container-fluid d-flex">
+      <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+        <i class="bi bi-layout-text-sidebar-reverse"></i>
+      </button>
+        <nav class="quarto-page-breadcrumbs" aria-label="Breadcrumbs"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../lectures/index.html">Lectures</a></li><li class="breadcrumb-item"><a href="../lectures/logistic-applications.html">Logistic Regression Applications</a></li></ol></nav>
+        <a class="flex-grow-1" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
+        </a>
+    </div>
+  </nav></header><!-- content --><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal quarto-sidebar-collapse-item sidebar-navigation docked overflow-auto" aria-label="Section"><div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+<li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <button type="button" class="sidebar-item-text sidebar-item-toggle sidebar-link text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-1" aria-controls="quarto-sidebar-section-1" aria-expanded="true">
+ <span class="menu-text" id="quarto-sidebar-section-1-label">Getting started</span><i class="bi bi-chevron-right" aria-hidden="true"></i></button>
+      </div>
+      <ul id="quarto-sidebar-section-1" aria-labelledby="quarto-sidebar-section-1-label" class="collapse list-unstyled sidebar-section depth1 show">
+<li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">About the notes</span></a>
+  </div>
+</li>
+      </ul>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a href="../lectures/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text" id="quarto-sidebar-section-2-label">Lectures</span></a>
+            <button type="button" class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-2" aria-controls="quarto-sidebar-section-2" aria-expanded="true" aria-label="Toggle section: Lectures">
+              <i class="bi bi-chevron-right ms-2" aria-hidden="true"></i>
+            </button> 
+      </div>
+      <ul id="quarto-sidebar-section-2" aria-labelledby="quarto-sidebar-section-2-label" class="collapse list-unstyled sidebar-section depth1 show">
+<li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/review-epi552.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Review of EPI 552</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/anova.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Analysis of Variance (ANOVA)</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/matrix-algebra.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Matrix Algebra for Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/statistical-modeling.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Statistical Modeling in Epidemiology</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/simple-linear-regression.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Simple Linear Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/multiple-linear-regression.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Multiple Linear Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/hypothesis-tests.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tests of Hypotheses in Multiple Linear Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/dummy-variables.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Dummy Variables</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/confounding-interaction.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Confounding and Interaction</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/model-selection.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Model Selection</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/diagnostics.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Regression Diagnostics</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-part-1.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression, Part 1</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-part-2.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Logistic Regression, Part 2</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/polytomous-ordinal.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Polytomous and Ordinal Logistic Regression</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../lectures/logistic-applications.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text">Logistic Regression Applications</span></a>
+  </div>
+</li>
+      </ul>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a href="../labs/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text" id="quarto-sidebar-section-3-label">Labs</span></a>
+            <button type="button" class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-3" aria-controls="quarto-sidebar-section-3" aria-expanded="true" aria-label="Toggle section: Labs">
+              <i class="bi bi-chevron-right ms-2" aria-hidden="true"></i>
+            </button> 
+      </div>
+      <ul id="quarto-sidebar-section-3" aria-labelledby="quarto-sidebar-section-3-label" class="collapse list-unstyled sidebar-section depth1 show">
+<li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../labs/lab-01-nhanes.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Lab 1: Exploring Health Survey Data with NHANES</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../labs/lab-02-anova.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Lab 2: One-Way ANOVA</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../labs/lab-03-correlation.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Lab 3: Correlation Analysis</span></a>
+  </div>
+</li>
+      </ul>
+</li>
+        <li class="sidebar-item sidebar-item-section">
+      <div class="sidebar-item-container"> 
+            <a href="../resources/index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text" id="quarto-sidebar-section-4-label">Resources</span></a>
+            <button type="button" class="sidebar-item-toggle text-start" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar-section-4" aria-controls="quarto-sidebar-section-4" aria-expanded="true" aria-label="Toggle section: Resources">
+              <i class="bi bi-chevron-right ms-2" aria-hidden="true"></i>
+            </button> 
+      </div>
+      <ul id="quarto-sidebar-section-4" aria-labelledby="quarto-sidebar-section-4-label" class="collapse list-unstyled sidebar-section depth1 show">
+<li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../resources/r-setup.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Setting Up R</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../resources/intro-to-r.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Introduction to R</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../resources/setup-checklist.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Week 1 Setup and Workflow Checklist</span></a>
+  </div>
+</li>
+          <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="../resources/submitting-your-work.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Submitting Your Work</span></a>
+  </div>
+</li>
+      </ul>
+</li>
+    </ul>
+</div>
+</nav><div id="quarto-sidebar-glass" class="quarto-sidebar-collapse-item" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" aria-labelledby="toc-title" class="toc-active"><h2 id="toc-title">On this page</h2>
+   
+  <ul>
+<li><a href="#introduction" id="toc-introduction" class="nav-link active" data-scroll-target="#introduction">Introduction</a></li>
+  <li>
+<a href="#part-1-a-model-building-strategy" id="toc-part-1-a-model-building-strategy" class="nav-link" data-scroll-target="#part-1-a-model-building-strategy">Part 1: A Model-Building Strategy</a>
+  <ul class="collapse">
+<li><a href="#two-schools-of-thought" id="toc-two-schools-of-thought" class="nav-link" data-scroll-target="#two-schools-of-thought">Two Schools of Thought</a></li>
+  </ul>
+</li>
+  <li>
+<a href="#part-2-worked-example" id="toc-part-2-worked-example" class="nav-link" data-scroll-target="#part-2-worked-example">Part 2: Worked Example</a>
+  <ul class="collapse">
+<li><a href="#setup" id="toc-setup" class="nav-link" data-scroll-target="#setup">Setup</a></li>
+  <li><a href="#research-question" id="toc-research-question" class="nav-link" data-scroll-target="#research-question">Research Question</a></li>
+  <li><a href="#step-1-descriptive-table-table-1" id="toc-step-1-descriptive-table-table-1" class="nav-link" data-scroll-target="#step-1-descriptive-table-table-1">Step 1: Descriptive Table (Table 1)</a></li>
+  <li><a href="#step-2-univariable-screening" id="toc-step-2-univariable-screening" class="nav-link" data-scroll-target="#step-2-univariable-screening">Step 2: Univariable Screening</a></li>
+  <li><a href="#step-3-build-the-multivariable-model" id="toc-step-3-build-the-multivariable-model" class="nav-link" data-scroll-target="#step-3-build-the-multivariable-model">Step 3: Build the Multivariable Model</a></li>
+  <li><a href="#step-4-assess-confounding" id="toc-step-4-assess-confounding" class="nav-link" data-scroll-target="#step-4-assess-confounding">Step 4: Assess Confounding</a></li>
+  <li><a href="#step-5-test-for-effect-modification-by-sex" id="toc-step-5-test-for-effect-modification-by-sex" class="nav-link" data-scroll-target="#step-5-test-for-effect-modification-by-sex">Step 5: Test for Effect Modification by Sex</a></li>
+  <li><a href="#stratum-specific-estimates" id="toc-stratum-specific-estimates" class="nav-link" data-scroll-target="#stratum-specific-estimates">Stratum-Specific Estimates</a></li>
+  <li><a href="#step-6-check-fit-and-assumptions" id="toc-step-6-check-fit-and-assumptions" class="nav-link" data-scroll-target="#step-6-check-fit-and-assumptions">Step 6: Check Fit and Assumptions</a></li>
+  <li><a href="#step-7-forest-plot-of-final-model" id="toc-step-7-forest-plot-of-final-model" class="nav-link" data-scroll-target="#step-7-forest-plot-of-final-model">Step 7: Forest Plot of Final Model</a></li>
+  </ul>
+</li>
+  <li>
+<a href="#part-3-reporting-results" id="toc-part-3-reporting-results" class="nav-link" data-scroll-target="#part-3-reporting-results">Part 3: Reporting Results</a>
+  <ul class="collapse">
+<li><a href="#a-publication-ready-paragraph" id="toc-a-publication-ready-paragraph" class="nav-link" data-scroll-target="#a-publication-ready-paragraph">A Publication-Ready Paragraph</a></li>
+  <li><a href="#what-every-logistic-regression-paper-should-report" id="toc-what-every-logistic-regression-paper-should-report" class="nav-link" data-scroll-target="#what-every-logistic-regression-paper-should-report">What Every Logistic Regression Paper Should Report</a></li>
+  </ul>
+</li>
+  <li><a href="#part-4-common-pitfalls" id="toc-part-4-common-pitfalls" class="nav-link" data-scroll-target="#part-4-common-pitfalls">Part 4: Common Pitfalls</a></li>
+  <li>
+<a href="#summary" id="toc-summary" class="nav-link" data-scroll-target="#summary">Summary</a>
+  <ul class="collapse">
+<li><a href="#next-lecture" id="toc-next-lecture" class="nav-link" data-scroll-target="#next-lecture">Next Lecture</a></li>
+  </ul>
+</li>
+  <li><a href="#references" id="toc-references" class="nav-link" data-scroll-target="#references">References</a></li>
+  </ul><div class="toc-actions"><ul><li><a href="https://github.com/muntasirmasum/epi553/edit/main/lectures/logistic-applications.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/muntasirmasum/epi553/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content page-columns page-full" id="quarto-document-content" tabindex="-1"><header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="Breadcrumbs"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="../lectures/index.html">Lectures</a></li><li class="breadcrumb-item"><a href="../lectures/logistic-applications.html">Logistic Regression Applications</a></li></ol></nav><div class="quarto-title">
+<h1 class="title">Logistic Regression Applications</h1>
+<p class="subtitle lead">Build, check, and report a logistic regression analysis from start to finish.</p>
+  <div class="quarto-categories">
+    <div class="quarto-category">Logistic regression</div>
+  </div>
+  </div>
+
+<div>
+  <div class="description">
+    A model-building strategy worked through on BRFSS 2020: Table 1, univariable screening, the multivariable model, confounding, effect modification, fit checks, a forest plot, and a publication-ready paragraph.
+  </div>
+</div>
+
+<div class="quarto-title-meta-author">
+  <div class="quarto-title-meta-heading">Author</div>
+  <div class="quarto-title-meta-heading">Affiliation</div>
+  
+    <div class="quarto-title-meta-contents">
+    <p class="author"><a href="https://muntasirmasum.com">Muntasir Masum</a> <a href="https://orcid.org/0000-0002-4210-2844" class="quarto-title-author-orcid" aria-label="ORCID profile for Muntasir Masum"> <img alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a></p>
+  </div>
+  <div class="quarto-title-meta-contents">
+        <p class="affiliation">
+            University at Albany, SUNY
+          </p>
+      </div>
+  </div>
+
+<div class="quarto-title-meta">
+
+      
+  
+    <div>
+    <div class="quarto-title-meta-heading">Modified</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date-modified">November 19, 2026</p>
+    </div>
+  </div>
+    
+  </div>
+  
+
+
+</header><div class="callout callout-style-simple callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Note</span>Learning objectives
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>By the end of this lecture you will be able to:</p>
+<ul>
+<li>follow a seven-step workflow from research question to reported model;</li>
+<li>screen candidate predictors and build a multivariable logistic model with gtsummary tables;</li>
+<li>assess confounding with the 10% change-in-estimate rule and effect modification with a likelihood ratio test;</li>
+<li>check model fit, discrimination, and collinearity before reporting;</li>
+<li>write a results paragraph whose wording follows the estimates, and avoid common pitfalls.</li>
+</ul>
+</div>
+</div>
+<section id="introduction" class="level2"><h2 class="anchored" data-anchor-id="introduction">Introduction</h2>
+<p>Over the last three lectures we have built up the machinery of logistic regression: the logit link, odds ratios, multiple predictors, Wald and likelihood ratio tests, interactions, goodness-of-fit, discrimination, and the polytomous and ordinal extensions. Today we put it all together.</p>
+<p>This is an <strong>applications lecture</strong>. We will work through a complete analytic workflow, from research question to publication-ready table, the way you would for a manuscript or a thesis chapter.</p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Note</span>Today’s roadmap
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ol type="1">
+<li>A principled model-building strategy</li>
+<li>Worked example: building a final model</li>
+<li>Reporting results for publication</li>
+<li>Common pitfalls and how to avoid them</li>
+</ol>
+</div>
+</div>
+</section><section id="part-1-a-model-building-strategy" class="level2"><h2 class="anchored" data-anchor-id="part-1-a-model-building-strategy">Part 1: A Model-Building Strategy</h2>
+<p>There is no single “correct” way to build a regression model. But there is a sensible workflow that most epidemiologists follow:</p>
+<div class="cell">
+<div class="cell-output-display">
+<table class="table table-striped table-hover caption-top table-sm small">
+<caption>Seven-Step Logistic Regression Workflow</caption>
+<thead><tr class="header">
+<th style="text-align: right;" data-quarto-table-cell-role="th">Step</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">Phase</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">Tools</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">1</td>
+<td style="text-align: left;">Define the research question</td>
+<td style="text-align: left;">DAG, prior literature, study design</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">2</td>
+<td style="text-align: left;">Univariable screening</td>
+<td style="text-align: left;">Simple glm() per predictor; tbl_uvregression()</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">3</td>
+<td style="text-align: left;">Build the multivariable model</td>
+<td style="text-align: left;">glm() with all candidates; tbl_regression()</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">4</td>
+<td style="text-align: left;">Assess confounding</td>
+<td style="text-align: left;">10% change-in-estimate rule; compare crude vs adjusted</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">5</td>
+<td style="text-align: left;">Test interactions</td>
+<td style="text-align: left;">* operator; LR test; ggpredict()</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">6</td>
+<td style="text-align: left;">Check fit and assumptions</td>
+<td style="text-align: left;">HL test, calibration, ROC/AUC, Cook's D, VIF</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">7</td>
+<td style="text-align: left;">Report and interpret</td>
+<td style="text-align: left;">tbl_regression(); narrative interpretation</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<section id="two-schools-of-thought" class="level3"><h3 class="anchored" data-anchor-id="two-schools-of-thought">Two Schools of Thought</h3>
+<p><strong>Predictive modeling.</strong> Goal: maximize out-of-sample accuracy. Use stepwise selection, LASSO, cross-validation, AUC. The OR is a means to an end.</p>
+<p><strong>Etiologic / explanatory modeling.</strong> Goal: estimate the unbiased causal effect of an exposure on an outcome. Use a DAG to choose covariates. Confounders are included; mediators and colliders are excluded. The OR for the exposure is the answer.</p>
+<p>Most public health research is <strong>etiologic</strong>. Today we adopt that mindset.</p>
+</section></section><section id="part-2-worked-example" class="level2 page-columns page-full"><h2 class="anchored" data-anchor-id="part-2-worked-example">Part 2: Worked Example</h2>
+<section id="setup" class="level3 page-columns page-full"><h3 class="anchored" data-anchor-id="setup">Setup</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://tidyverse.tidyverse.org">tidyverse</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://muntasirmasum.github.io/brfssdata/">brfssdata</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://broom.tidymodels.org/">broom</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://yihui.org/knitr/">knitr</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://haozhu233.github.io/kableExtra/">kableExtra</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/ddsjoberg/gtsummary">gtsummary</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/bprice2652/car_repo">car</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://strengejacke.github.io/ggeffects/">ggeffects</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/psolymos/ResourceSelection">ResourceSelection</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://xrobin.github.io/pROC/">pROC</a></span><span class="op">)</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/library.html">library</a></span><span class="op">(</span><span class="va"><a href="https://easystats.github.io/performance/">performance</a></span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>BRFSS 2020 codebook: <a href="https://www.cdc.gov/brfss/annual_data/annual_2020.html">CDC annual data page</a>. Package documentation: <a href="https://muntasirmasum.github.io/brfssdata/">brfssdata</a>.</p>
+</div></div><div class="data-card">
+<p><span class="eyebrow">Data for this lecture</span></p>
+<p><strong>BRFSS 2020, loaded with the brfssdata R package.</strong> The first time you run the code below, <code><a href="https://muntasirmasum.github.io/brfssdata/reference/read_brfss.html">read_brfss()</a></code> downloads the 2020 survey (about 21 MB) and keeps it on your computer, so later runs read it from there. The code below repeats the recoding and sample from Logistic Regression, Part 1, so this page uses the same 5,000 adults.</p>
+<p>Install the packages this lecture adds once with <code>install.packages(c("brfssdata", "janitor", "ResourceSelection", "pROC", "performance"))</code>.</p>
+</div>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="co"># Read the ten BRFSS 2020 variables this lecture uses (CDC names;</span></span>
+<span><span class="co"># names that start with an underscore need quotes)</span></span>
+<span><span class="va">brfss_full</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://muntasirmasum.github.io/brfssdata/reference/read_brfss.html">read_brfss</a></span><span class="op">(</span></span>
+<span>  <span class="fl">2020</span>,</span>
+<span>  vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"MENTHLTH"</span>, <span class="st">"PHYSHLTH"</span>, <span class="st">"SLEPTIM1"</span>, <span class="st">"_AGE80"</span>, <span class="st">"SEXVAR"</span>, <span class="st">"_BMI5"</span>,</span>
+<span>           <span class="st">"EXERANY2"</span>, <span class="st">"INCOME2"</span>, <span class="st">"SMOKE100"</span>, <span class="st">"SMOKDAY2"</span><span class="op">)</span></span>
+<span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">janitor</span><span class="fu">::</span><span class="fu"><a href="https://sfirke.github.io/janitor/reference/clean_names.html">clean_names</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<p>The question about current smoking (<code>SMOKDAY2</code>) is asked only of people who have smoked at least 100 cigarettes in their life (<code>SMOKE100</code>). People who never reached 100 cigarettes are coded as former/never smokers rather than dropped.</p>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">brfss_logistic</span> <span class="op">&lt;-</span> <span class="va">brfss_full</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html">mutate</a></span><span class="op">(</span></span>
+<span>    <span class="co"># Binary outcome: frequent mental distress (&gt;= 14 days)</span></span>
+<span>    menthlth_days <span class="op">=</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/case-and-replace-when.html">case_when</a></span><span class="op">(</span></span>
+<span>      <span class="va">menthlth</span> <span class="op">==</span> <span class="fl">88</span>                  <span class="op">~</span> <span class="fl">0</span>,</span>
+<span>      <span class="va">menthlth</span> <span class="op">&gt;=</span> <span class="fl">1</span> <span class="op">&amp;</span> <span class="va">menthlth</span> <span class="op">&lt;=</span> <span class="fl">30</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html">as.numeric</a></span><span class="op">(</span><span class="va">menthlth</span><span class="op">)</span>,</span>
+<span>      <span class="cn">TRUE</span>                           <span class="op">~</span> <span class="cn">NA_real_</span></span>
+<span>    <span class="op">)</span>,</span>
+<span>    fmd <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html">factor</a></span><span class="op">(</span></span>
+<span>      <span class="fu"><a href="https://rdrr.io/r/base/ifelse.html">ifelse</a></span><span class="op">(</span><span class="va">menthlth_days</span> <span class="op">&gt;=</span> <span class="fl">14</span>, <span class="fl">1</span>, <span class="fl">0</span><span class="op">)</span>,</span>
+<span>      levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">1</span><span class="op">)</span>,</span>
+<span>      labels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"No"</span>, <span class="st">"Yes"</span><span class="op">)</span></span>
+<span>    <span class="op">)</span>,</span>
+<span>    <span class="co"># Predictors</span></span>
+<span>    physhlth_days <span class="op">=</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/case-and-replace-when.html">case_when</a></span><span class="op">(</span></span>
+<span>      <span class="va">physhlth</span> <span class="op">==</span> <span class="fl">88</span>                  <span class="op">~</span> <span class="fl">0</span>,</span>
+<span>      <span class="va">physhlth</span> <span class="op">&gt;=</span> <span class="fl">1</span> <span class="op">&amp;</span> <span class="va">physhlth</span> <span class="op">&lt;=</span> <span class="fl">30</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html">as.numeric</a></span><span class="op">(</span><span class="va">physhlth</span><span class="op">)</span>,</span>
+<span>      <span class="cn">TRUE</span>                           <span class="op">~</span> <span class="cn">NA_real_</span></span>
+<span>    <span class="op">)</span>,</span>
+<span>    sleep_hrs <span class="op">=</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/case-and-replace-when.html">case_when</a></span><span class="op">(</span></span>
+<span>      <span class="va">sleptim1</span> <span class="op">&gt;=</span> <span class="fl">1</span> <span class="op">&amp;</span> <span class="va">sleptim1</span> <span class="op">&lt;=</span> <span class="fl">14</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html">as.numeric</a></span><span class="op">(</span><span class="va">sleptim1</span><span class="op">)</span>,</span>
+<span>      <span class="cn">TRUE</span>                           <span class="op">~</span> <span class="cn">NA_real_</span></span>
+<span>    <span class="op">)</span>,</span>
+<span>    age <span class="op">=</span> <span class="va">age80</span>,</span>
+<span>    sex <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html">factor</a></span><span class="op">(</span><span class="va">sexvar</span>, levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span><span class="op">)</span>, labels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"Male"</span>, <span class="st">"Female"</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>    bmi <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/ifelse.html">ifelse</a></span><span class="op">(</span><span class="va">bmi5</span> <span class="op">&gt;</span> <span class="fl">0</span>, <span class="va">bmi5</span> <span class="op">/</span> <span class="fl">100</span>, <span class="cn">NA_real_</span><span class="op">)</span>,</span>
+<span>    exercise <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html">factor</a></span><span class="op">(</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/case-and-replace-when.html">case_when</a></span><span class="op">(</span></span>
+<span>      <span class="va">exerany2</span> <span class="op">==</span> <span class="fl">1</span> <span class="op">~</span> <span class="st">"Yes"</span>,</span>
+<span>      <span class="va">exerany2</span> <span class="op">==</span> <span class="fl">2</span> <span class="op">~</span> <span class="st">"No"</span>,</span>
+<span>      <span class="cn">TRUE</span>          <span class="op">~</span> <span class="cn">NA_character_</span></span>
+<span>    <span class="op">)</span>, levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"No"</span>, <span class="st">"Yes"</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>    income_cat <span class="op">=</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/case-and-replace-when.html">case_when</a></span><span class="op">(</span></span>
+<span>      <span class="va">income2</span> <span class="op"><a href="https://rdrr.io/r/base/match.html">%in%</a></span> <span class="fl">1</span><span class="op">:</span><span class="fl">8</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html">as.numeric</a></span><span class="op">(</span><span class="va">income2</span><span class="op">)</span>,</span>
+<span>      <span class="cn">TRUE</span>             <span class="op">~</span> <span class="cn">NA_real_</span></span>
+<span>    <span class="op">)</span>,</span>
+<span>    <span class="co"># SMOKDAY2 is asked only of people who have smoked 100 cigarettes</span></span>
+<span>    <span class="co"># (SMOKE100 = 1), so people who have not are coded Former/Never</span></span>
+<span>    smoker <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/factor.html">factor</a></span><span class="op">(</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/case-and-replace-when.html">case_when</a></span><span class="op">(</span></span>
+<span>      <span class="va">smoke100</span> <span class="op">==</span> <span class="fl">2</span>                         <span class="op">~</span> <span class="st">"Former/Never"</span>,</span>
+<span>      <span class="va">smoke100</span> <span class="op">==</span> <span class="fl">1</span> <span class="op">&amp;</span> <span class="va">smokday2</span> <span class="op"><a href="https://rdrr.io/r/base/match.html">%in%</a></span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span><span class="op">)</span> <span class="op">~</span> <span class="st">"Current"</span>,</span>
+<span>      <span class="va">smoke100</span> <span class="op">==</span> <span class="fl">1</span> <span class="op">&amp;</span> <span class="va">smokday2</span> <span class="op">==</span> <span class="fl">3</span>         <span class="op">~</span> <span class="st">"Former/Never"</span>,</span>
+<span>      <span class="cn">TRUE</span>                                  <span class="op">~</span> <span class="cn">NA_character_</span></span>
+<span>    <span class="op">)</span>, levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"Former/Never"</span>, <span class="st">"Current"</span><span class="op">)</span><span class="op">)</span></span>
+<span>  <span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html">filter</a></span><span class="op">(</span></span>
+<span>    <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">fmd</span><span class="op">)</span>, <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">physhlth_days</span><span class="op">)</span>, <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">sleep_hrs</span><span class="op">)</span>,</span>
+<span>    <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">age</span><span class="op">)</span>, <span class="va">age</span> <span class="op">&gt;=</span> <span class="fl">18</span>, <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">sex</span><span class="op">)</span>, <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">bmi</span><span class="op">)</span>,</span>
+<span>    <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">exercise</span><span class="op">)</span>, <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">income_cat</span><span class="op">)</span>, <span class="op">!</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html">is.na</a></span><span class="op">(</span><span class="va">smoker</span><span class="op">)</span></span>
+<span>  <span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/Random.html">set.seed</a></span><span class="op">(</span><span class="fl">1220</span><span class="op">)</span></span>
+<span><span class="va">brfss_logistic</span> <span class="op">&lt;-</span> <span class="va">brfss_logistic</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/select.html">select</a></span><span class="op">(</span><span class="va">fmd</span>, <span class="va">menthlth_days</span>, <span class="va">physhlth_days</span>, <span class="va">sleep_hrs</span>, <span class="va">age</span>, <span class="va">sex</span>,</span>
+<span>                <span class="va">bmi</span>, <span class="va">exercise</span>, <span class="va">income_cat</span>, <span class="va">smoker</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/slice.html">slice_sample</a></span><span class="op">(</span>n <span class="op">=</span> <span class="fl">5000</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+</section><section id="research-question" class="level3"><h3 class="anchored" data-anchor-id="research-question">Research Question</h3>
+<blockquote class="blockquote">
+<p><em>Among U.S. adults, is any physical activity or exercise in the past 30 days (outside of work) associated with lower odds of frequent mental distress (FMD), after adjusting for demographic, behavioral, and socioeconomic confounders? Does the association differ by sex?</em></p>
+</blockquote>
+<ul>
+<li>
+<strong>Exposure:</strong> <code>exercise</code> (Yes / No)</li>
+<li>
+<strong>Outcome:</strong> <code>fmd</code> (Yes / No)</li>
+<li>
+<strong>Candidate confounders:</strong> age, sex, BMI, sleep hours, income category, smoking status</li>
+<li>
+<strong>Effect modifier of interest:</strong> sex</li>
+</ul></section><section id="step-1-descriptive-table-table-1" class="level3"><h3 class="anchored" data-anchor-id="step-1-descriptive-table-table-1">Step 1: Descriptive Table (Table 1)</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">brfss_logistic</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/tbl_summary.html">tbl_summary</a></span><span class="op">(</span></span>
+<span>    by <span class="op">=</span> <span class="va">fmd</span>,</span>
+<span>    include <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="va">exercise</span>, <span class="va">age</span>, <span class="va">sex</span>, <span class="va">bmi</span>, <span class="va">sleep_hrs</span>, <span class="va">income_cat</span>, <span class="va">smoker</span><span class="op">)</span>,</span>
+<span>    statistic <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html">list</a></span><span class="op">(</span><span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/select_helpers.html">all_continuous</a></span><span class="op">(</span><span class="op">)</span> <span class="op">~</span> <span class="st">"{mean} ({sd})"</span><span class="op">)</span>,</span>
+<span>    label <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html">list</a></span><span class="op">(</span></span>
+<span>      <span class="va">exercise</span>   <span class="op">~</span> <span class="st">"Exercise (past 30 days)"</span>,</span>
+<span>      <span class="va">age</span>        <span class="op">~</span> <span class="st">"Age (years)"</span>,</span>
+<span>      <span class="va">sex</span>        <span class="op">~</span> <span class="st">"Sex"</span>,</span>
+<span>      <span class="va">bmi</span>        <span class="op">~</span> <span class="st">"BMI (kg/m²)"</span>,</span>
+<span>      <span class="va">sleep_hrs</span>  <span class="op">~</span> <span class="st">"Sleep (hours)"</span>,</span>
+<span>      <span class="va">income_cat</span> <span class="op">~</span> <span class="st">"Income category"</span>,</span>
+<span>      <span class="va">smoker</span>     <span class="op">~</span> <span class="st">"Smoking status"</span></span>
+<span>    <span class="op">)</span></span>
+<span>  <span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/add_p.html">add_p</a></span><span class="op">(</span>test <span class="op">=</span> <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/select_helpers.html">all_continuous</a></span><span class="op">(</span><span class="op">)</span> <span class="op">~</span> <span class="st">"t.test"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/add_overall.html">add_overall</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">bold_labels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/modify.html">modify_header</a></span><span class="op">(</span><span class="va">label</span> <span class="op">~</span> <span class="st">"**Characteristic**"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/modify_caption.html">modify_caption</a></span><span class="op">(</span><span class="st">"Table 1. Sample characteristics by frequent mental distress status."</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span>escape <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table caption-top table-sm table-striped small">
+<caption>Table 1. Sample characteristics by frequent mental distress status.</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Characteristic</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">Overall N = 5,000</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">No N = 4,349</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">Yes N = 651</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">p-value</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Exercise (past 30 days)</td>
+<td style="text-align: center;">3,869 (77%)</td>
+<td style="text-align: center;">3,403 (78%)</td>
+<td style="text-align: center;">466 (72%)</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">Age (years)</td>
+<td style="text-align: center;">54 (17)</td>
+<td style="text-align: center;">54 (17)</td>
+<td style="text-align: center;">49 (17)</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Sex</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Male</td>
+<td style="text-align: center;">2,427 (49%)</td>
+<td style="text-align: center;">2,194 (50%)</td>
+<td style="text-align: center;">233 (36%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Female</td>
+<td style="text-align: center;">2,573 (51%)</td>
+<td style="text-align: center;">2,155 (50%)</td>
+<td style="text-align: center;">418 (64%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">BMI (kg/m²)</td>
+<td style="text-align: center;">28.6 (6.3)</td>
+<td style="text-align: center;">28.4 (6.1)</td>
+<td style="text-align: center;">29.6 (7.7)</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Sleep (hours)</td>
+<td style="text-align: center;">7.07 (1.34)</td>
+<td style="text-align: center;">7.14 (1.28)</td>
+<td style="text-align: center;">6.61 (1.64)</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">Income category</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">1</td>
+<td style="text-align: center;">179 (3.6%)</td>
+<td style="text-align: center;">134 (3.1%)</td>
+<td style="text-align: center;">45 (6.9%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">2</td>
+<td style="text-align: center;">190 (3.8%)</td>
+<td style="text-align: center;">142 (3.3%)</td>
+<td style="text-align: center;">48 (7.4%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">3</td>
+<td style="text-align: center;">304 (6.1%)</td>
+<td style="text-align: center;">246 (5.7%)</td>
+<td style="text-align: center;">58 (8.9%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">4</td>
+<td style="text-align: center;">438 (8.8%)</td>
+<td style="text-align: center;">363 (8.3%)</td>
+<td style="text-align: center;">75 (12%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">5</td>
+<td style="text-align: center;">506 (10%)</td>
+<td style="text-align: center;">421 (9.7%)</td>
+<td style="text-align: center;">85 (13%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">6</td>
+<td style="text-align: center;">683 (14%)</td>
+<td style="text-align: center;">601 (14%)</td>
+<td style="text-align: center;">82 (13%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">7</td>
+<td style="text-align: center;">785 (16%)</td>
+<td style="text-align: center;">696 (16%)</td>
+<td style="text-align: center;">89 (14%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">8</td>
+<td style="text-align: center;">1,915 (38%)</td>
+<td style="text-align: center;">1,746 (40%)</td>
+<td style="text-align: center;">169 (26%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Smoking status</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Former/Never</td>
+<td style="text-align: center;">4,271 (85%)</td>
+<td style="text-align: center;">3,779 (87%)</td>
+<td style="text-align: center;">492 (76%)</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Current</td>
+<td style="text-align: center;">729 (15%)</td>
+<td style="text-align: center;">570 (13%)</td>
+<td style="text-align: center;">159 (24%)</td>
+<td style="text-align: center;"></td>
+</tr>
+</tbody>
+<tfoot>
+<tr class="odd">
+<td style="text-align: left; padding: 0;">
+<sup>1</sup> n (%); Mean (SD)</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding: 0;">
+<sup>2</sup> Pearson's Chi-squared test; Welch Two Sample t-test</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+</tfoot>
+</table>
+</div>
+</div>
+</section><section id="step-2-univariable-screening" class="level3"><h3 class="anchored" data-anchor-id="step-2-univariable-screening">Step 2: Univariable Screening</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">brfss_logistic</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/tbl_uvregression.html">tbl_uvregression</a></span><span class="op">(</span></span>
+<span>    method <span class="op">=</span> <span class="va">glm</span>,</span>
+<span>    y <span class="op">=</span> <span class="va">fmd</span>,</span>
+<span>    method.args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html">list</a></span><span class="op">(</span>family <span class="op">=</span> <span class="va">binomial</span><span class="op">)</span>,</span>
+<span>    exponentiate <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>    include <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="va">exercise</span>, <span class="va">age</span>, <span class="va">sex</span>, <span class="va">bmi</span>, <span class="va">sleep_hrs</span>, <span class="va">income_cat</span>, <span class="va">smoker</span><span class="op">)</span></span>
+<span>  <span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">bold_labels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/modify_caption.html">modify_caption</a></span><span class="op">(</span><span class="st">"Table 2. Crude (unadjusted) odds ratios for frequent mental distress."</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span>escape <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table caption-top table-sm table-striped small">
+<caption>Table 2. Crude (unadjusted) odds ratios for frequent mental distress.</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Characteristic</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">N</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">OR</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">95% CI</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">p-value</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">exercise</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">No</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Yes</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">0.70</td>
+<td style="text-align: center;">0.58, 0.84</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">age</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;">0.98</td>
+<td style="text-align: center;">0.98, 0.99</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">sex</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Male</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Female</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">1.83</td>
+<td style="text-align: center;">1.54, 2.17</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">bmi</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;">1.03</td>
+<td style="text-align: center;">1.02, 1.04</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">sleep_hrs</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;">0.75</td>
+<td style="text-align: center;">0.70, 0.80</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">income_cat</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;">0.83</td>
+<td style="text-align: center;">0.80, 0.86</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">smoker</td>
+<td style="text-align: center;">5,000</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Former/Never</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Current</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;">2.14</td>
+<td style="text-align: center;">1.75, 2.61</td>
+<td style="text-align: center;">&lt;0.001</td>
+</tr>
+</tbody>
+<tfoot><tr class="odd">
+<td style="text-align: left; padding: 0;">
+<sup></sup> Abbreviations: CI = Confidence Interval, OR = Odds Ratio</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr></tfoot>
+</table>
+</div>
+</div>
+</section><section id="step-3-build-the-multivariable-model" class="level3"><h3 class="anchored" data-anchor-id="step-3-build-the-multivariable-model">Step 3: Build the Multivariable Model</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">mod_full</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/glm.html">glm</a></span><span class="op">(</span></span>
+<span>  <span class="va">fmd</span> <span class="op">~</span> <span class="va">exercise</span> <span class="op">+</span> <span class="va">age</span> <span class="op">+</span> <span class="va">sex</span> <span class="op">+</span> <span class="va">bmi</span> <span class="op">+</span> <span class="va">sleep_hrs</span> <span class="op">+</span> <span class="va">income_cat</span> <span class="op">+</span> <span class="va">smoker</span>,</span>
+<span>  data <span class="op">=</span> <span class="va">brfss_logistic</span>,</span>
+<span>  family <span class="op">=</span> <span class="va">binomial</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">mod_full</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/tbl_regression.html">tbl_regression</a></span><span class="op">(</span></span>
+<span>    exponentiate <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>    label <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html">list</a></span><span class="op">(</span></span>
+<span>      <span class="va">exercise</span>   <span class="op">~</span> <span class="st">"Exercise"</span>,</span>
+<span>      <span class="va">age</span>        <span class="op">~</span> <span class="st">"Age"</span>,</span>
+<span>      <span class="va">sex</span>        <span class="op">~</span> <span class="st">"Sex"</span>,</span>
+<span>      <span class="va">bmi</span>        <span class="op">~</span> <span class="st">"BMI"</span>,</span>
+<span>      <span class="va">sleep_hrs</span>  <span class="op">~</span> <span class="st">"Sleep hours"</span>,</span>
+<span>      <span class="va">income_cat</span> <span class="op">~</span> <span class="st">"Income category"</span>,</span>
+<span>      <span class="va">smoker</span>     <span class="op">~</span> <span class="st">"Smoker"</span></span>
+<span>    <span class="op">)</span></span>
+<span>  <span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_italicize_labels_levels.html">bold_labels</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/bold_p.html">bold_p</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/modify_caption.html">modify_caption</a></span><span class="op">(</span><span class="st">"Table 3. Adjusted odds ratios for frequent mental distress."</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://www.danieldsjoberg.com/gtsummary/reference/as_kable_extra.html">as_kable_extra</a></span><span class="op">(</span>escape <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table caption-top table-sm table-striped small">
+<caption>Table 3. Adjusted odds ratios for frequent mental distress.</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Characteristic</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">OR</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">95% CI</th>
+<th style="text-align: center;" data-quarto-table-cell-role="th">p-value</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Exercise</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">No</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Yes</td>
+<td style="text-align: center;">0.87</td>
+<td style="text-align: center;">0.71, 1.06</td>
+<td style="text-align: center;">0.2</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">Age</td>
+<td style="text-align: center;">0.98</td>
+<td style="text-align: center;">0.98, 0.99</td>
+<td style="text-align: center; font-weight: bold;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Sex</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Male</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Female</td>
+<td style="text-align: center;">1.78</td>
+<td style="text-align: center;">1.49, 2.13</td>
+<td style="text-align: center; font-weight: bold;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">BMI</td>
+<td style="text-align: center;">1.02</td>
+<td style="text-align: center;">1.01, 1.03</td>
+<td style="text-align: center; font-weight: bold;">0.002</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Sleep hours</td>
+<td style="text-align: center;">0.79</td>
+<td style="text-align: center;">0.74, 0.84</td>
+<td style="text-align: center; font-weight: bold;">&lt;0.001</td>
+</tr>
+<tr class="even">
+<td style="text-align: left; font-weight: bold;">Income category</td>
+<td style="text-align: center;">0.87</td>
+<td style="text-align: center;">0.83, 0.90</td>
+<td style="text-align: center; font-weight: bold;">&lt;0.001</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; font-weight: bold;">Smoker</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="even">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Former/Never</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr class="odd">
+<td style="text-align: left; padding-left: 2em;" data-indentlevel="1">Current</td>
+<td style="text-align: center;">1.64</td>
+<td style="text-align: center;">1.32, 2.02</td>
+<td style="text-align: center; font-weight: bold;">&lt;0.001</td>
+</tr>
+</tbody>
+<tfoot><tr class="odd">
+<td style="text-align: left; padding: 0;">
+<sup></sup> Abbreviations: CI = Confidence Interval, OR = Odds Ratio</td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr></tfoot>
+</table>
+</div>
+</div>
+</section><section id="step-4-assess-confounding" class="level3"><h3 class="anchored" data-anchor-id="step-4-assess-confounding">Step 4: Assess Confounding</h3>
+<p>The classic <strong>10% change-in-estimate</strong> rule: a covariate is a confounder of the exposure-outcome relationship if including it changes the exposure OR by more than 10%.</p>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">mod_crude</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/glm.html">glm</a></span><span class="op">(</span><span class="va">fmd</span> <span class="op">~</span> <span class="va">exercise</span>, data <span class="op">=</span> <span class="va">brfss_logistic</span>, family <span class="op">=</span> <span class="va">binomial</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">crude_or</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Log.html">exp</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html">coef</a></span><span class="op">(</span><span class="va">mod_crude</span><span class="op">)</span><span class="op">[</span><span class="st">"exerciseYes"</span><span class="op">]</span><span class="op">)</span></span>
+<span><span class="va">adj_or</span>   <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Log.html">exp</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html">coef</a></span><span class="op">(</span><span class="va">mod_full</span><span class="op">)</span><span class="op">[</span><span class="st">"exerciseYes"</span><span class="op">]</span><span class="op">)</span></span>
+<span><span class="va">pct_change</span> <span class="op">&lt;-</span> <span class="fl">100</span> <span class="op">*</span> <span class="fu"><a href="https://rdrr.io/r/base/MathFun.html">abs</a></span><span class="op">(</span><span class="va">adj_or</span> <span class="op">-</span> <span class="va">crude_or</span><span class="op">)</span> <span class="op">/</span> <span class="va">crude_or</span>  <span class="co"># size of the change</span></span>
+<span></span>
+<span><span class="fu"><a href="https://tibble.tidyverse.org/reference/tibble.html">tibble</a></span><span class="op">(</span></span>
+<span>  Quantity <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"Crude OR (exercise)"</span>,</span>
+<span>               <span class="st">"Adjusted OR (exercise)"</span>,</span>
+<span>               <span class="st">"% change in estimate (absolute)"</span><span class="op">)</span>,</span>
+<span>  Value    <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="va">crude_or</span>, <span class="fl">3</span><span class="op">)</span>,</span>
+<span>               <span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="va">adj_or</span>, <span class="fl">3</span><span class="op">)</span>,</span>
+<span>               <span class="fu"><a href="https://rdrr.io/r/base/paste.html">paste0</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="va">pct_change</span>, <span class="fl">1</span><span class="op">)</span>, <span class="st">"%"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/knitr/man/kable.html">kable</a></span><span class="op">(</span>caption <span class="op">=</span> <span class="st">"Change-in-Estimate for Exercise"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/kableExtra/man/kable_styling.html">kable_styling</a></span><span class="op">(</span>bootstrap_options <span class="op">=</span> <span class="st">"striped"</span>, full_width <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table table-striped caption-top table-sm small">
+<caption>Change-in-Estimate for Exercise</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Quantity</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">Value</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Crude OR (exercise)</td>
+<td style="text-align: left;">0.7</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Adjusted OR (exercise)</td>
+<td style="text-align: left;">0.866</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">% change in estimate (absolute)</td>
+<td style="text-align: left;">23.7%</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Tip</span>Interpretation
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>A change of more than 10% in either direction suggests meaningful confounding by the included covariates; the table reports the size of the change. Here the exercise OR moves from 0.70 (crude) to 0.87 (adjusted), a change of 23.7%, more than 10%, so the covariates confound the association between exercise and FMD. The adjusted OR is closer to 1: part of the crude association reflects differences in age, sex, BMI, sleep, income, and smoking between adults who do and do not exercise. After adjustment the 95% CI for exercise is 0.71 to 1.06, which includes 1. The adjusted OR is the more reliable estimate.</p>
+</div>
+</div>
+<div class="callout callout-style-default callout-warning callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Warning</span>Confounder or mediator?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The etiologic approach in Part 1 leaves mediators out of the model, yet the model above adjusts for sleep hours and BMI. Exercise can improve sleep and lower BMI, so both may lie on the path from exercise to mental distress. Adjusting for a mediator removes part of the effect we want to estimate, so part of the change from the crude OR may not be confounding. Leaving sleep and BMI out (adjusting for age, sex, income, and smoking only) gives an exercise OR of 0.80 (95% CI 0.66 to 0.98). A DAG drawn before the analysis is how to decide which model answers the research question.</p>
+</div>
+</div>
+</section><section id="step-5-test-for-effect-modification-by-sex" class="level3"><h3 class="anchored" data-anchor-id="step-5-test-for-effect-modification-by-sex">Step 5: Test for Effect Modification by Sex</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">mod_int</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/glm.html">glm</a></span><span class="op">(</span></span>
+<span>  <span class="va">fmd</span> <span class="op">~</span> <span class="va">exercise</span> <span class="op">*</span> <span class="va">sex</span> <span class="op">+</span> <span class="va">age</span> <span class="op">+</span> <span class="va">bmi</span> <span class="op">+</span> <span class="va">sleep_hrs</span> <span class="op">+</span> <span class="va">income_cat</span> <span class="op">+</span> <span class="va">smoker</span>,</span>
+<span>  data <span class="op">=</span> <span class="va">brfss_logistic</span>,</span>
+<span>  family <span class="op">=</span> <span class="va">binomial</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">lr_int</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/anova.html">anova</a></span><span class="op">(</span><span class="va">mod_full</span>, <span class="va">mod_int</span>, test <span class="op">=</span> <span class="st">"LRT"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">lr_int</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/knitr/man/kable.html">kable</a></span><span class="op">(</span>digits <span class="op">=</span> <span class="fl">3</span>, caption <span class="op">=</span> <span class="st">"LR Test: Exercise × Sex Interaction"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/kableExtra/man/kable_styling.html">kable_styling</a></span><span class="op">(</span>bootstrap_options <span class="op">=</span> <span class="st">"striped"</span>, full_width <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table table-striped caption-top table-sm small">
+<caption>LR Test: Exercise × Sex Interaction</caption>
+<thead><tr class="header">
+<th style="text-align: right;" data-quarto-table-cell-role="th">Resid. Df</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Resid. Dev</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Df</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Deviance</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Pr(&gt;Chi)</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">4992</td>
+<td style="text-align: right;">3565.882</td>
+<td style="text-align: right;">NA</td>
+<td style="text-align: right;">NA</td>
+<td style="text-align: right;">NA</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">4991</td>
+<td style="text-align: right;">3565.261</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0.621</td>
+<td style="text-align: right;">0.431</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>The LR statistic is 0.62 on 1 df (p = 0.431), so there is no evidence that the association between exercise and FMD differs by sex.</p>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="fu"><a href="https://strengejacke.github.io/ggeffects/reference/ggpredict.html">ggpredict</a></span><span class="op">(</span><span class="va">mod_int</span>, terms <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"exercise"</span>, <span class="st">"sex"</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html">plot</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html">labs</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"Predicted Probability of FMD by Exercise and Sex"</span>,</span>
+<span>       x <span class="op">=</span> <span class="st">"Exercise"</span>, y <span class="op">=</span> <span class="st">"Predicted Probability"</span>, color <span class="op">=</span> <span class="st">"Sex"</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html">theme_minimal</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<div>
+<figure class="figure"><p><a href="logistic-applications_files/figure-html/interaction-plot-1.png" class="lightbox" data-gallery="quarto-lightbox-gallery-1"><img src="logistic-applications_files/figure-html/interaction-plot-1.png" class="img-fluid figure-img" alt="Dot-and-interval plot of the predicted probability of FMD by exercise (No, Yes) and sex. Women are higher at both levels, about 15% without exercise and 13% with it; men are about 8% at both levels. The 95% intervals for adults who do not exercise are wide." width="768"></a></p>
+</figure>
+</div>
+</div>
+</div>
+</section><section id="stratum-specific-estimates" class="level3"><h3 class="anchored" data-anchor-id="stratum-specific-estimates">Stratum-Specific Estimates</h3>
+<p>If the interaction is meaningful, report ORs <strong>within each level of sex</strong>:</p>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">mod_male</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/glm.html">glm</a></span><span class="op">(</span></span>
+<span>  <span class="va">fmd</span> <span class="op">~</span> <span class="va">exercise</span> <span class="op">+</span> <span class="va">age</span> <span class="op">+</span> <span class="va">bmi</span> <span class="op">+</span> <span class="va">sleep_hrs</span> <span class="op">+</span> <span class="va">income_cat</span> <span class="op">+</span> <span class="va">smoker</span>,</span>
+<span>  data <span class="op">=</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html">filter</a></span><span class="op">(</span><span class="va">brfss_logistic</span>, <span class="va">sex</span> <span class="op">==</span> <span class="st">"Male"</span><span class="op">)</span>,</span>
+<span>  family <span class="op">=</span> <span class="va">binomial</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">mod_female</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/glm.html">glm</a></span><span class="op">(</span></span>
+<span>  <span class="va">fmd</span> <span class="op">~</span> <span class="va">exercise</span> <span class="op">+</span> <span class="va">age</span> <span class="op">+</span> <span class="va">bmi</span> <span class="op">+</span> <span class="va">sleep_hrs</span> <span class="op">+</span> <span class="va">income_cat</span> <span class="op">+</span> <span class="va">smoker</span>,</span>
+<span>  data <span class="op">=</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html">filter</a></span><span class="op">(</span><span class="va">brfss_logistic</span>, <span class="va">sex</span> <span class="op">==</span> <span class="st">"Female"</span><span class="op">)</span>,</span>
+<span>  family <span class="op">=</span> <span class="va">binomial</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">strata</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/bind_rows.html">bind_rows</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="https://generics.r-lib.org/reference/tidy.html">tidy</a></span><span class="op">(</span><span class="va">mod_male</span>,   exponentiate <span class="op">=</span> <span class="cn">TRUE</span>, conf.int <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>    <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html">filter</a></span><span class="op">(</span><span class="va">term</span> <span class="op">==</span> <span class="st">"exerciseYes"</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html">mutate</a></span><span class="op">(</span>stratum <span class="op">=</span> <span class="st">"Male"</span><span class="op">)</span>,</span>
+<span>  <span class="fu"><a href="https://generics.r-lib.org/reference/tidy.html">tidy</a></span><span class="op">(</span><span class="va">mod_female</span>, exponentiate <span class="op">=</span> <span class="cn">TRUE</span>, conf.int <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>    <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html">filter</a></span><span class="op">(</span><span class="va">term</span> <span class="op">==</span> <span class="st">"exerciseYes"</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html">mutate</a></span><span class="op">(</span>stratum <span class="op">=</span> <span class="st">"Female"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># ORs implied by the interaction model (the model the LR test in Step 5 uses)</span></span>
+<span><span class="va">b</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/coef.html">coef</a></span><span class="op">(</span><span class="va">mod_int</span><span class="op">)</span></span>
+<span><span class="va">or_int</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span>Male   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Log.html">exp</a></span><span class="op">(</span><span class="va">b</span><span class="op">[[</span><span class="st">"exerciseYes"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span>,</span>
+<span>            Female <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Log.html">exp</a></span><span class="op">(</span><span class="va">b</span><span class="op">[[</span><span class="st">"exerciseYes"</span><span class="op">]</span><span class="op">]</span> <span class="op">+</span> <span class="va">b</span><span class="op">[[</span><span class="st">"exerciseYes:sexFemale"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">strata</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/select.html">select</a></span><span class="op">(</span><span class="va">stratum</span>, <span class="va">estimate</span>, <span class="va">conf.low</span>, <span class="va">conf.high</span>, <span class="va">p.value</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html">mutate</a></span><span class="op">(</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/across.html">across</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="va">estimate</span>, <span class="va">conf.low</span>, <span class="va">conf.high</span><span class="op">)</span>, \<span class="op">(</span><span class="va">x</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="va">x</span>, <span class="fl">3</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>         p.value <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/format.pval.html">format.pval</a></span><span class="op">(</span><span class="va">p.value</span>, digits <span class="op">=</span> <span class="fl">3</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/knitr/man/kable.html">kable</a></span><span class="op">(</span>col.names <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"Sex"</span>, <span class="st">"OR (Exercise)"</span>, <span class="st">"Lower"</span>, <span class="st">"Upper"</span>, <span class="st">"p"</span><span class="op">)</span>,</span>
+<span>        caption <span class="op">=</span> <span class="st">"Stratum-Specific ORs for Exercise"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/kableExtra/man/kable_styling.html">kable_styling</a></span><span class="op">(</span>bootstrap_options <span class="op">=</span> <span class="st">"striped"</span>, full_width <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table table-striped caption-top table-sm small">
+<caption>Stratum-Specific ORs for Exercise</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Sex</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">OR (Exercise)</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Lower</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Upper</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">p</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Male</td>
+<td style="text-align: right;">1.020</td>
+<td style="text-align: right;">0.729</td>
+<td style="text-align: right;">1.446</td>
+<td style="text-align: left;">0.912</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Female</td>
+<td style="text-align: right;">0.784</td>
+<td style="text-align: right;">0.609</td>
+<td style="text-align: right;">1.012</td>
+<td style="text-align: left;">0.060</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>Here the exercise OR is 1.02 among men and 0.78 among women. These come from separate models for men and women, which let every covariate’s effect differ by sex. The interaction model tested in Step 5 lets only the exercise effect differ; its ORs are 0.96 for men and 0.82 for women. The point estimates differ, but the interaction test found no evidence that the difference is larger than chance, so the single adjusted OR from Step 3 is the main result; the stratum-specific ORs are shown for transparency.</p>
+</section><section id="step-6-check-fit-and-assumptions" class="level3"><h3 class="anchored" data-anchor-id="step-6-check-fit-and-assumptions">Step 6: Check Fit and Assumptions</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">fit_stats</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html">list</a></span><span class="op">(</span></span>
+<span>  `McFadden R²`   <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="fu">performance</span><span class="fu">::</span><span class="fu"><a href="https://easystats.github.io/performance/reference/r2_mcfadden.html">r2_mcfadden</a></span><span class="op">(</span><span class="va">mod_full</span><span class="op">)</span><span class="op">$</span><span class="va">R2</span>, <span class="fl">3</span><span class="op">)</span>,</span>
+<span>  `HL p-value`    <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/pkg/ResourceSelection/man/hoslem.test.html">hoslem.test</a></span><span class="op">(</span></span>
+<span>                      x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html">as.numeric</a></span><span class="op">(</span><span class="va">brfss_logistic</span><span class="op">$</span><span class="va">fmd</span><span class="op">)</span> <span class="op">-</span> <span class="fl">1</span>,</span>
+<span>                      y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/fitted.values.html">fitted</a></span><span class="op">(</span><span class="va">mod_full</span><span class="op">)</span>, g <span class="op">=</span> <span class="fl">10</span><span class="op">)</span><span class="op">$</span><span class="va">p.value</span>, <span class="fl">3</span><span class="op">)</span>,</span>
+<span>  `AUC`           <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/numeric.html">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/pkg/pROC/man/auc.html">auc</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/pkg/pROC/man/roc.html">roc</a></span><span class="op">(</span></span>
+<span>                      <span class="va">brfss_logistic</span><span class="op">$</span><span class="va">fmd</span>, <span class="fu"><a href="https://rdrr.io/r/stats/fitted.values.html">fitted</a></span><span class="op">(</span><span class="va">mod_full</span><span class="op">)</span>,</span>
+<span>                      levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span><span class="st">"No"</span>, <span class="st">"Yes"</span><span class="op">)</span>, direction <span class="op">=</span> <span class="st">"&lt;"</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span>,</span>
+<span>  `Max VIF`       <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Extremes.html">max</a></span><span class="op">(</span><span class="fu">car</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/pkg/car/man/vif.html">vif</a></span><span class="op">(</span><span class="va">mod_full</span><span class="op">)</span><span class="op">)</span>, <span class="fl">2</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://tibble.tidyverse.org/reference/tibble.html">tibble</a></span><span class="op">(</span>Measure <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/names.html">names</a></span><span class="op">(</span><span class="va">fit_stats</span><span class="op">)</span>, Value <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/unlist.html">unlist</a></span><span class="op">(</span><span class="va">fit_stats</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/knitr/man/kable.html">kable</a></span><span class="op">(</span>caption <span class="op">=</span> <span class="st">"Fit and Diagnostic Summary"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/pkg/kableExtra/man/kable_styling.html">kable_styling</a></span><span class="op">(</span>bootstrap_options <span class="op">=</span> <span class="st">"striped"</span>, full_width <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<table class="table table-striped caption-top table-sm small">
+<caption>Fit and Diagnostic Summary</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Measure</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">Value</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">McFadden R²</td>
+<td style="text-align: right;">0.078</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">HL p-value</td>
+<td style="text-align: right;">0.864</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">AUC</td>
+<td style="text-align: right;">0.700</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Max VIF</td>
+<td style="text-align: right;">1.110</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>McFadden’s R² is 0.078. The Hosmer-Lemeshow test finds no evidence of lack of fit (p = 0.864). The AUC of 0.700 is at the boundary between poor and acceptable discrimination on the scale from Logistic Regression, Part 2. The largest VIF is 1.11, so collinearity is not a concern.</p>
+</section><section id="step-7-forest-plot-of-final-model" class="level3"><h3 class="anchored" data-anchor-id="step-7-forest-plot-of-final-model">Step 7: Forest Plot of Final Model</h3>
+<div class="cell">
+<details open="" class="code-fold"><summary>Show the code</summary><div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="downlit sourceCode r code-with-copy"><code class="sourceCode R"><span><span class="va">term_names</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html">c</a></span><span class="op">(</span>exerciseYes <span class="op">=</span> <span class="st">"Exercise"</span>, age <span class="op">=</span> <span class="st">"Age"</span>, sexFemale <span class="op">=</span> <span class="st">"Female sex"</span>, bmi <span class="op">=</span> <span class="st">"BMI"</span>,</span>
+<span>                sleep_hrs <span class="op">=</span> <span class="st">"Sleep hours"</span>, income_cat <span class="op">=</span> <span class="st">"Income category"</span>,</span>
+<span>                smokerCurrent <span class="op">=</span> <span class="st">"Current smoker"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://generics.r-lib.org/reference/tidy.html">tidy</a></span><span class="op">(</span><span class="va">mod_full</span>, exponentiate <span class="op">=</span> <span class="cn">TRUE</span>, conf.int <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html">filter</a></span><span class="op">(</span><span class="va">term</span> <span class="op">!=</span> <span class="st">"(Intercept)"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggplot.html">ggplot</a></span><span class="op">(</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html">aes</a></span><span class="op">(</span>x <span class="op">=</span> <span class="va">estimate</span>, y <span class="op">=</span> <span class="fu"><a href="https://forcats.tidyverse.org/reference/fct_reorder.html">fct_reorder</a></span><span class="op">(</span><span class="va">term_names</span><span class="op">[</span><span class="va">term</span><span class="op">]</span>, <span class="va">estimate</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/geom_abline.html">geom_vline</a></span><span class="op">(</span>xintercept <span class="op">=</span> <span class="fl">1</span>, linetype <span class="op">=</span> <span class="st">"dashed"</span>, color <span class="op">=</span> <span class="st">"grey50"</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/geom_linerange.html">geom_pointrange</a></span><span class="op">(</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html">aes</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="va">conf.low</span>, xmax <span class="op">=</span> <span class="va">conf.high</span><span class="op">)</span>,</span>
+<span>                  color <span class="op">=</span> <span class="st">"steelblue"</span>, linewidth <span class="op">=</span> <span class="fl">0.8</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_continuous.html">scale_x_log10</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html">labs</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"Adjusted Odds Ratios for Frequent Mental Distress"</span>,</span>
+<span>       x <span class="op">=</span> <span class="st">"Adjusted OR (log scale)"</span>, y <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html">theme_minimal</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details><div class="cell-output-display">
+<div>
+<figure class="figure"><p><a href="logistic-applications_files/figure-html/forest-1.png" class="lightbox" data-gallery="quarto-lightbox-gallery-2"><img src="logistic-applications_files/figure-html/forest-1.png" class="img-fluid figure-img" alt="Forest plot of adjusted odds ratios with 95% confidence intervals on a log-scale x-axis, with a dashed grey reference line at 1. From largest to smallest: female sex about 1.8, current smoking about 1.6, BMI just above 1, age just below 1, income and exercise about 0.87, and sleep hours about 0.79. Current smoking and exercise have the widest intervals; exercise's, about 0.71 to 1.06, is the only one that crosses 1." width="768"></a></p>
+</figure>
+</div>
+</div>
+</div>
+</section></section><section id="part-3-reporting-results" class="level2"><h2 class="anchored" data-anchor-id="part-3-reporting-results">Part 3: Reporting Results</h2>
+<section id="a-publication-ready-paragraph" class="level3"><h3 class="anchored" data-anchor-id="a-publication-ready-paragraph">A Publication-Ready Paragraph</h3>
+<p>The paragraph below is written from the estimates above; every number and every direction word comes from the model output.</p>
+<blockquote class="blockquote">
+<p><em>In adjusted models, current smokers had 1.64 times the odds of frequent mental distress compared with former or never smokers (aOR = 1.64; 95% CI: 1.32, 2.02). Each additional hour of sleep was associated with 21% lower odds of FMD (aOR = 0.79; 95% CI: 0.74, 0.84). Exercise was associated with lower odds of FMD before adjustment (crude OR = 0.70), but after adjustment for demographic, behavioral, and socioeconomic covariates the association was attenuated and no longer statistically significant (aOR = 0.87; 95% CI: 0.71, 1.06). The likelihood ratio test for an exercise × sex interaction was not statistically significant (p = 0.431; exercise ORs from the interaction model 0.96 for men and 0.82 for women), so the data provide no evidence that the association with exercise differs by sex.</em></p>
+</blockquote>
+</section><section id="what-every-logistic-regression-paper-should-report" class="level3"><h3 class="anchored" data-anchor-id="what-every-logistic-regression-paper-should-report">What Every Logistic Regression Paper Should Report</h3>
+<ol type="1">
+<li><strong>Sample size and outcome prevalence</strong></li>
+<li>
+<strong>Table 1</strong> stratified by outcome</li>
+<li>
+<strong>Crude and adjusted ORs</strong> with 95% CIs (not just p-values)</li>
+<li>
+<strong>Which covariates were included and why</strong> (DAG, prior literature, change-in-estimate)</li>
+<li>
+<strong>Tests of effect modification</strong> that were planned</li>
+<li>
+<strong>Goodness-of-fit and discrimination</strong> metrics (HL or calibration plot, AUC)</li>
+<li>
+<strong>Software and packages</strong> with versions</li>
+</ol></section></section><section id="part-4-common-pitfalls" class="level2"><h2 class="anchored" data-anchor-id="part-4-common-pitfalls">Part 4: Common Pitfalls</h2>
+<div class="cell">
+<div class="cell-output-display">
+<table class="table table-striped table-hover caption-top table-sm small">
+<caption>Common Pitfalls in Logistic Regression</caption>
+<thead><tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Pitfall</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">Fix</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Reporting p-values without ORs and CIs</td>
+<td style="text-align: left;">Always show point estimates with 95% CIs</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Stepwise selection on small samples</td>
+<td style="text-align: left;">Use a DAG; pre-specify covariates</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Adjusting for mediators</td>
+<td style="text-align: left;">Draw a DAG; do not adjust on the causal pathway</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Adjusting for colliders</td>
+<td style="text-align: left;">Avoid conditioning on common effects of exposure and outcome</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Ignoring the events-per-variable rule (EPV &lt; 10)</td>
+<td style="text-align: left;">Aim for ≥ 10 events per predictor; use penalized methods if not</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Interpreting OR as relative risk when outcome is common</td>
+<td style="text-align: left;">Use log-binomial or modified Poisson when prevalence &gt; ~10%</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Forgetting to check linearity in the logit</td>
+<td style="text-align: left;">Restricted cubic splines or LOWESS-of-logit plots</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Reporting only the p-value of an interaction</td>
+<td style="text-align: left;">Always show stratum-specific estimates</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section><section id="summary" class="level2"><h2 class="anchored" data-anchor-id="summary">Summary</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 35%">
+<col style="width: 64%">
+</colgroup>
+<thead><tr class="header">
+<th>Step</th>
+<th>Key Action</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><strong>1. Question</strong></td>
+<td>Anchor your model in a clear research question and DAG</td>
+</tr>
+<tr class="even">
+<td><strong>2. Screen</strong></td>
+<td>Univariable models inform but do not select</td>
+</tr>
+<tr class="odd">
+<td><strong>3. Build</strong></td>
+<td>Include confounders identified a priori</td>
+</tr>
+<tr class="even">
+<td><strong>4. Confound</strong></td>
+<td>Compare crude vs adjusted; 10% rule of thumb</td>
+</tr>
+<tr class="odd">
+<td><strong>5. Modify</strong></td>
+<td>Plan interactions; report stratum-specific estimates</td>
+</tr>
+<tr class="even">
+<td><strong>6. Check</strong></td>
+<td>Fit, calibration, discrimination, diagnostics</td>
+</tr>
+<tr class="odd">
+<td><strong>7. Report</strong></td>
+<td>ORs + CIs, narrative interpretation, full transparency</td>
+</tr>
+</tbody>
+</table>
+<section id="next-lecture" class="level3"><h3 class="anchored" data-anchor-id="next-lecture">Next Lecture</h3>
+<ul>
+<li>Poisson regression for count outcomes</li>
+<li>Survival analysis: an introduction</li>
+</ul></section></section><section id="references" class="level2"><h2 class="anchored" data-anchor-id="references">References</h2>
+<ul>
+<li>Kleinbaum, D. G., Kupper, L. L., Nizam, A., &amp; Rosenberg, E. S. (2013). <em>Applied Regression Analysis and Other Multivariable Methods</em> (5th ed.), Chapters 22-23.</li>
+<li>Hosmer, D. W., Lemeshow, S., &amp; Sturdivant, R. X. (2013). <em>Applied Logistic Regression</em> (3rd ed.). Wiley.</li>
+<li>Vittinghoff, E., et al.&nbsp;(2012). <em>Regression Methods in Biostatistics</em> (2nd ed.). Springer.</li>
+<li>Greenland, S. (1989). Modeling and variable selection in epidemiologic analysis. <em>American Journal of Public Health</em>, 79(3), 340-349.</li>
+</ul>
+<p><em>No lab activity for this lecture: you have practiced this workflow in the previous three labs.</em></p>
+<div class="callout callout-style-default callout-note callout-titled">
+<div class="callout-header d-flex align-content-center collapsed" data-bs-toggle="collapse" data-bs-target=".callout-5-contents" aria-controls="callout-5" aria-expanded="false" aria-label="Toggle callout">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Note</span>Session info
+</div>
+<div class="callout-btn-toggle d-inline-block border-0 py-1 ps-1 pe-0 float-end"><i class="callout-toggle"></i></div>
+</div>
+<div id="callout-5" class="callout-5-contents callout-collapse collapse">
+<div class="callout-body-container callout-body">
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>R version 4.6.1 (2026-06-24)
+Platform: aarch64-apple-darwin23
+Running under: macOS Golden Gate 27.2.1
+
+Matrix products: default
+BLAS:   ~/.uvr/r-versions/4.6.1/lib/libRblas.0.dylib 
+LAPACK: ~/.uvr/r-versions/4.6.1/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US/en_US/en_US/C/en_US/en_US
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] performance_0.19.0      pROC_1.19.1             ResourceSelection_0.3-6
+ [4] ggeffects_2.3.2         car_3.1-5               carData_3.0-6          
+ [7] gtsummary_2.6.1         broom_1.0.13            brfssdata_0.1.1        
+[10] lubridate_1.9.5         forcats_1.0.1           stringr_1.6.0          
+[13] dplyr_1.2.1             purrr_1.2.2             readr_2.2.0            
+[16] tidyr_1.3.2             tibble_3.3.1            ggplot2_4.0.3          
+[19] tidyverse_2.0.0         kableExtra_1.4.1        knitr_1.52             
+
+loaded via a namespace (and not attached):
+ [1] gtable_0.3.6         xfun_0.62            htmlwidgets_1.6.4   
+ [4] insight_1.7.0        lattice_0.23-1       tzdb_0.5.0          
+ [7] vctrs_0.7.3          tools_4.6.1          generics_0.1.4      
+[10] datawizard_1.5.0     pkgconfig_2.0.3      Matrix_1.7-6        
+[13] RColorBrewer_1.1-3   S7_0.2.2             lifecycle_1.0.5     
+[16] compiler_4.6.1       farver_2.1.2         textshaping_1.0.5   
+[19] janitor_2.2.1        mitools_2.7          snakecase_0.11.1    
+[22] survey_4.5           htmltools_0.5.9      yaml_2.3.12         
+[25] Formula_1.2-6        pillar_1.11.1        broom.helpers_1.23.0
+[28] abind_1.4-8          sjlabelled_1.2.0     tidyselect_1.2.1    
+[31] digest_0.6.39        stringi_1.8.9        duckdb_2.0.0        
+[34] labeling_0.4.3       splines_4.6.1        labelled_2.16.1     
+[37] fastmap_1.2.0        grid_4.6.1           cli_3.6.6           
+[40] magrittr_2.0.5       cards_0.9.0          survival_3.8-12     
+[43] withr_3.0.3          scales_1.4.0         backports_1.5.1     
+[46] cardx_0.3.4          timechange_0.4.0     rmarkdown_2.32      
+[49] otel_0.3.0           srvyr_1.3.1          hms_1.1.4           
+[52] evaluate_1.0.5       haven_2.5.5          viridisLite_0.4.3   
+[55] rlang_1.3.0          Rcpp_1.1.2           glue_1.8.1          
+[58] DBI_1.3.0            xml2_1.6.0           svglite_2.2.2       
+[61] rstudioapi_0.19.0    jsonlite_2.0.0       R6_2.6.1            
+[64] systemfonts_1.3.2   </code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+
+</section><a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a><div id="quarto-appendix" class="default"><section class="quarto-appendix-contents" id="quarto-reuse"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a></div></div></section></div></main><!-- /main --><script>
+/* Accessibility fixes shared by all course sites.
+   1. Collapsible callout headers become keyboard-operable buttons.
+   2. Markdown tables get a horizontal scroll wrapper on narrow screens.
+   3. Any output that scrolls horizontally becomes reachable by keyboard. */
+(function () {
+  function fixCalloutHeaders() {
+    document.querySelectorAll('.callout-header[data-bs-toggle="collapse"]').forEach(function (h) {
+      h.setAttribute("role", "button");
+      h.setAttribute("tabindex", "0");
+      // Let the visible title name the button instead of "Toggle callout".
+      h.removeAttribute("aria-label");
+      h.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          h.click();
+        }
+      });
+    });
+  }
+
+  function wrapTables() {
+    document.querySelectorAll("main table").forEach(function (t) {
+      var p = t.parentElement;
+      if (p.classList.contains("mm-table-scroll") || p.closest(".cell-output-display")) return;
+      var w = document.createElement("div");
+      w.className = "mm-table-scroll";
+      p.insertBefore(w, t);
+      w.appendChild(t);
+    });
+  }
+
+  var SCROLLERS = ".cell-output-display, .cell-output pre, div.sourceCode, .mm-table-scroll, mjx-container[display='true']";
+
+  function markScrollable() {
+    document.querySelectorAll(SCROLLERS).forEach(function (el) {
+      var scrolls = el.scrollWidth > el.clientWidth + 1;
+      if (scrolls && !el.hasAttribute("tabindex")) {
+        el.setAttribute("tabindex", "0");
+        el.setAttribute("data-mm-scroll", "");
+      } else if (!scrolls && el.hasAttribute("data-mm-scroll")) {
+        el.removeAttribute("tabindex");
+        el.removeAttribute("data-mm-scroll");
+      }
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    fixCalloutHeaders();
+    wrapTables();
+  });
+
+  var timer;
+  function scheduleMark() {
+    clearTimeout(timer);
+    timer = setTimeout(markScrollable, 150);
+  }
+
+  window.addEventListener("load", function () {
+    markScrollable();
+    // Re-check once MathJax has typeset the equations.
+    if (window.MathJax && MathJax.startup && MathJax.startup.promise) {
+      MathJax.startup.promise.then(markScrollable);
+    } else {
+      setTimeout(markScrollable, 1500);
+    }
+  });
+  window.addEventListener("resize", scheduleMark);
+  // Content revealed later: collapsed callouts, tabsets, folded code.
+  document.addEventListener("shown.bs.collapse", scheduleMark);
+  document.addEventListener("shown.bs.tab", scheduleMark);
+  document.addEventListener("toggle", scheduleMark, true);
+})();
+</script><script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    // Ensure there is a toggle, if there isn't float one in the top right
+    if (window.document.querySelector('.quarto-color-scheme-toggle') === null) {
+      const toggle = window.document.createElement('button');
+      toggle.type = "button";
+      toggle.setAttribute("role", "switch");
+      toggle.setAttribute("aria-checked", "false");
+      toggle.classList.add('top-right');
+      toggle.classList.add('quarto-color-scheme-toggle');
+      toggle.setAttribute("aria-label", "Toggle dark mode");
+      toggle.onclick = function() { try { window.quartoToggleColorScheme(); } catch {} return false; };
+      const i = window.document.createElement("i");
+      i.classList.add('bi');
+      toggle.appendChild(i);
+      // Put the toggle in a landmark of its own, so that landmark navigation
+      // can reach it.
+      //
+      // The container is always a fresh direct child of body, and the toggle is
+      // never moved into page furniture that the theme or the author controls.
+      // The toggle is positioned against the page, so any ancestor that
+      // establishes a containing block captures it: a positioned element or a
+      // grid for position: absolute, and transform, filter, will-change or
+      // contain for position: fixed. A direct child of body has none of these
+      // to inherit, and the shift when one appears is silent and visual.
+      //
+      // ARIA says a document should have at most one banner, and axe reports a
+      // duplicate whether or not the banners carry distinct labels. So use a
+      // header when the page has no banner yet, and a named region otherwise.
+      //
+      // A header is a banner wherever it sits, unless it is inside sectioning
+      // content, so this cannot just look at the children of body: a custom
+      // page layout wraps the title block header in a plain div. An explicit
+      // role="banner" always counts.
+      const sectioning = 'article, aside, main, nav, section, [role="article"], [role="complementary"], [role="main"], [role="navigation"], [role="region"]';
+      const hasBanner = Array.from(
+        window.document.querySelectorAll('header:not([role]), [role="banner"]')
+      ).some(function(el) {
+        return el.hasAttribute("role") || el.closest(sectioning) === null;
+      });
+      const container = window.document.createElement(hasBanner ? "div" : "header");
+      if (hasBanner) {
+        container.setAttribute("role", "region");
+        container.setAttribute("aria-label", "Toggle dark mode");
+      }
+      container.classList.add('quarto-color-scheme-toggle-container');
+      container.appendChild(toggle);
+      window.document.body.appendChild(container);
+    }
+    setColorSchemeToggle(hasAlternateSentinel())
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/epi553\.muntasirmasum\.com");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+      window.quartoDecorateExternalLinks = function (root) {
+     var links = (root || window.document).querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+          if (!link.classList.contains('no-external-icon')) {
+          }
+        }
+      }
+      };
+      window.quartoDecorateExternalLinks(window.document);
+    // Esc closes the popup (WCAG 1.4.13) and focus leaving both trigger and
+    // popup closes it (WCAG 2.4.11); tippy handles neither for interactive popups.
+    const hideOnEscAndFocusOut = {
+      name: 'hideOnEscAndFocusOut',
+      defaultValue: true,
+      fn(instance) {
+        const dismiss = () => {
+          // A show scheduled by the trigger delay would otherwise reopen it
+          instance.clearDelayTimeouts();
+          instance.hide();
+        };
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') {
+            return;
+          }
+          // Keep Esc from also reaching page handlers (e.g. reveal.js overview),
+          // except an open reveal.js slide menu, which Esc should close too.
+          // The menu handles keys only when its keyboard option is on.
+          const menuHandlesEsc = window.Reveal?.getPlugin?.('menu')?.isOpen() &&
+            window.Reveal.getConfig().menu?.keyboard !== false;
+          if (!menuHandlesEsc) {
+            event.stopPropagation();
+          }
+          if (instance.popper.contains(window.document.activeElement)) {
+            // Disabled while refocusing so the focus trigger does not reopen it
+            instance.disable();
+            instance.reference.focus();
+            instance.enable();
+          }
+          dismiss();
+        };
+        const onFocusOut = (event) => {
+          const target = event.relatedTarget;
+          if (target && !instance.reference.contains(target) &&
+              !instance.popper.contains(target)) {
+            dismiss();
+          }
+        };
+        // On the trigger too: a click trigger (code-annotations: select) has no
+        // blur handling. Attached for the instance's lifetime so leaving the
+        // trigger also cancels a show still pending on the trigger delay.
+        instance.reference.addEventListener('focusout', onFocusOut);
+        return {
+          onShow() {
+            window.document.addEventListener('keydown', onKeyDown, true);
+            instance.popper.addEventListener('focusout', onFocusOut);
+          },
+          onHide() {
+            window.document.removeEventListener('keydown', onKeyDown, true);
+            instance.popper.removeEventListener('focusout', onFocusOut);
+          },
+          onDestroy() {
+            instance.reference.removeEventListener('focusout', onFocusOut);
+          },
+        };
+      },
+    };
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+        plugins: [hideOnEscAndFocusOut],
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          // Each band is positioned against its own containing block, which is
+          // not the offsetParent of the lines, so place it from client rects.
+          const placeBand = (band, firstEl, lastEl, codeBlock) => {
+            const container = band.offsetParent;
+            if (container === null) {
+              return;
+            }
+            const containerRect = container.getBoundingClientRect();
+            // Reveal.js scales slides with a transform, so convert client
+            // pixels back to the CSS pixels of the container.
+            const scale = containerRect.height / container.offsetHeight || 1;
+            const firstRect = firstEl.getBoundingClientRect();
+            const lastRect = lastEl.getBoundingClientRect();
+            const top = (firstRect.top - containerRect.top) / scale - container.clientTop + container.scrollTop;
+            const height = (lastRect.bottom - firstRect.top) / scale;
+            band.style.top = top - 2 + "px";
+            band.style.height = height + 4 + "px";
+            if (codeBlock) {
+              // Without the copy button wrapper, the containing block is wider
+              // than the code block, so span the code block explicitly.
+              const blockRect = codeBlock.getBoundingClientRect();
+              band.style.left = (blockRect.left - containerRect.left) / scale - container.clientLeft + container.scrollLeft + "px";
+              band.style.width = blockRect.width / scale + "px";
+            }
+          };
+          if (lineIds.length > 0) {
+            const el = window.document.getElementById(lineIds[0]);
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const parent = el.parentElement.parentElement;
+            // cook up a div (if necessary) and position it
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            placeBand(div, el, lastEl, parent.closest("div.sourceCode") || parent);
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            placeBand(gutterDiv, el, lastEl);
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script><script type="application/javascript">
+  window.quartoScrollableRegionsLabels = {"code":"Scrollable code","output":"Scrollable output"};
+  </script><nav class="page-navigation" aria-label="Page"><div class="nav-page nav-page-previous">
+      <a href="../lectures/polytomous-ordinal.html" class="pagination-link" aria-label="Polytomous and Ordinal Logistic Regression">
+        <i class="bi bi-arrow-left-short"></i> <span class="nav-page-text">Polytomous and Ordinal Logistic Regression</span>
+      </a>          
+  </div>
+  <div class="nav-page nav-page-next">
+      <a href="../labs/index.html" class="pagination-link" aria-label="Labs">
+        <span class="nav-page-text">Labs</span> <i class="bi bi-arrow-right-short"></i>
+      </a>
+  </div>
+</nav>
+</div> <!-- /content -->
+<footer class="footer"><div class="nav-footer">
+    <div class="nav-footer-left">
+<p>© 2026 <a href="https://muntasirmasum.com">Muntasir Masum</a>, University at Albany. Content licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>.</p>
+</div>   
+    <div class="nav-footer-center">
+      &nbsp;
+    <div class="toc-actions d-sm-block d-md-none"><ul><li><a href="https://github.com/muntasirmasum/epi553/edit/main/lectures/logistic-applications.qmd" class="toc-action"><i class="bi bi-github"></i>Edit this page</a></li><li><a href="https://github.com/muntasirmasum/epi553/issues/new" class="toc-action"><i class="bi empty"></i>Report an issue</a></li></ul></div></div>
+    <div class="nav-footer-right">
+<p>Built with <a href="https://quarto.org/">Quarto</a>.</p>
+</div>
+  </div>
+</footer><script>var lightboxQuarto = GLightbox({"closeEffect":"zoom","descPosition":"bottom","loop":false,"openEffect":"zoom","selector":".lightbox"});
+(function() {
+  let previousOnload = window.onload;
+  window.onload = () => {
+    if (previousOnload) {
+      previousOnload();
+    }
+    lightboxQuarto.on('slide_before_load', (data) => {
+      const { slideIndex, slideNode, slideConfig, player, trigger } = data;
+      const href = trigger.getAttribute('href');
+      if (href !== null) {
+        const imgEl = window.document.querySelector(`a[href="${href}"] img`);
+        if (imgEl !== null) {
+          const srcAttr = imgEl.getAttribute("src");
+          if (srcAttr && srcAttr.startsWith("data:")) {
+            slideConfig.href = srcAttr;
+          }
+        }
+      } 
+    });
+  
+    lightboxQuarto.on('slide_after_load', (data) => {
+      const { slideIndex, slideNode, slideConfig, player, trigger } = data;
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(slideNode);
+      }
+    });
+  
+  };
+  
+})();
+          </script>
+
+
+<script src="../site_libs/quarto-html/zenscroll-min.js"></script>
+</body></html>

@@ -1,0 +1,212 @@
+---
+title: "Polytomous and Ordinal Logistic Regression Lab"
+author: "Your Name"
+format:
+  html:
+    embed-resources: true
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+# Load packages (MASS first, so it does not mask dplyr's select())
+library(MASS)
+library(tidyverse)
+library(brfssdata)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(gtsummary)
+library(nnet)
+library(brant)
+library(ggeffects)
+
+options(gtsummary.use_ftExtra = TRUE)
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# Read and recode BRFSS 2020 (same steps as the lecture)
+brfss_full <- read_brfss(
+  2020,
+  vars = c("GENHLTH", "_AGE80", "SEXVAR", "_BMI5", "EXERANY2", "INCOME2",
+           "SMOKE100", "SMOKDAY2")
+) |>
+  janitor::clean_names()
+
+brfss_poly <- brfss_full |>
+  mutate(
+    # 3-level ordinal outcome
+    genhlth_3 = case_when(
+      genhlth %in% c(1, 2) ~ "Excellent/VG",
+      genhlth == 3         ~ "Good",
+      genhlth %in% c(4, 5) ~ "Fair/Poor",
+      TRUE                 ~ NA_character_
+    ),
+    # Ordered factor for ordinal regression
+    genhlth_ord = factor(genhlth_3,
+      levels = c("Excellent/VG", "Good", "Fair/Poor"),
+      ordered = TRUE),
+    # Unordered factor for polytomous regression
+    genhlth_nom = factor(genhlth_3,
+      levels = c("Excellent/VG", "Good", "Fair/Poor")),
+    # Predictors
+    age = age80,
+    sex = factor(sexvar, levels = c(1, 2), labels = c("Male", "Female")),
+    bmi = ifelse(bmi5 > 0, bmi5 / 100, NA_real_),
+    exercise = factor(case_when(
+      exerany2 == 1 ~ "Yes",
+      exerany2 == 2 ~ "No",
+      TRUE          ~ NA_character_
+    ), levels = c("No", "Yes")),
+    income_cat = case_when(
+      income2 %in% 1:8 ~ as.numeric(income2),
+      TRUE             ~ NA_real_
+    ),
+    # SMOKDAY2 is asked only of people who have smoked 100 cigarettes
+    # (SMOKE100 = 1), so people who have not are coded Former/Never
+    smoker = factor(case_when(
+      smoke100 == 2                         ~ "Former/Never",
+      smoke100 == 1 & smokday2 %in% c(1, 2) ~ "Current",
+      smoke100 == 1 & smokday2 == 3         ~ "Former/Never",
+      TRUE                                  ~ NA_character_
+    ), levels = c("Former/Never", "Current"))
+  ) |>
+  filter(
+    !is.na(genhlth_ord), !is.na(age), age >= 18, !is.na(sex),
+    !is.na(bmi), !is.na(exercise), !is.na(income_cat), !is.na(smoker)
+  )
+
+set.seed(1220)
+brfss_poly <- brfss_poly |>
+  dplyr::select(genhlth_ord, genhlth_nom, age, sex, bmi,
+                exercise, income_cat, smoker) |>
+  slice_sample(n = 5000)
+```
+
+## Task 1: Explore the Outcome (15 points)
+
+**1a. (5 pts)** Create a frequency table of `genhlth_ord` showing N and percentage for each category.
+
+```{r}
+#| label: task-1a
+
+```
+
+*Your answer:*
+
+**1b. (5 pts)** Create a stacked bar chart showing the distribution of general health by `smoker` status.
+
+```{r}
+#| label: task-1b
+
+```
+
+*Your answer:*
+
+**1c. (5 pts)** Use `tbl_summary()` to create a descriptive table stratified by `genhlth_ord` with at least 4 predictors.
+
+```{r}
+#| label: task-1c
+
+```
+
+*Your answer:*
+
+## Task 2: Multinomial Logistic Regression (20 points)
+
+**2a. (5 pts)** Fit a multinomial logistic regression model predicting `genhlth_nom` from at least 4 predictors using `multinom()`.
+
+```{r}
+#| label: task-2a
+
+```
+
+*Your answer:*
+
+**2b. (10 pts)** Report the relative risk ratios (exponentiated coefficients) with 95% CIs in a clean table.
+
+```{r}
+#| label: task-2b
+
+```
+
+*Your answer:*
+
+**2c. (5 pts)** Interpret the RRR for one predictor in the "Fair/Poor vs. Excellent/VG" comparison.
+
+```{r}
+#| label: task-2c
+
+```
+
+*Your answer:*
+
+## Task 3: Ordinal Logistic Regression (25 points)
+
+**3a. (5 pts)** Fit an ordinal logistic regression model with the same predictors using `polr()`.
+
+```{r}
+#| label: task-3a
+
+```
+
+*Your answer:*
+
+**3b. (5 pts)** Report the cumulative ORs with 95% CIs.
+
+```{r}
+#| label: task-3b
+
+```
+
+*Your answer:*
+
+**3c. (5 pts)** Interpret one OR in plain language, making sure to mention the "at every cut-point" property.
+
+```{r}
+#| label: task-3c
+
+```
+
+*Your answer:*
+
+**3d. (10 pts)** Use `ggpredict()` to plot predicted probabilities of each health category across a continuous predictor of your choice. Use `plot(show_ci = FALSE)`, as in the lecture: the bands `ggpredict()` draws for `polr()` models are too wide.
+
+```{r}
+#| label: task-3d
+
+```
+
+*Your answer:*
+
+## Task 4: Check Assumptions and Compare (15 points)
+
+**4a. (5 pts)** Run the Brant test for proportional odds. Does the assumption hold?
+
+```{r}
+#| label: task-4a
+
+```
+
+*Your answer:*
+
+**4b. (5 pts)** Compare the AIC of the multinomial and ordinal models. Which fits better?
+
+```{r}
+#| label: task-4b
+
+```
+
+*Your answer:*
+
+**4c. (5 pts)** Based on your results, which model would you recommend reporting? Justify in 2-3 sentences.
+
+```{r}
+#| label: task-4c
+
+```
+
+*Your answer:*
+
+**Completion credit (25 points):** Awarded for a complete, good-faith attempt. Total: 75 + 25 = 100 points.
